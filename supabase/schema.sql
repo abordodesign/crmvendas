@@ -59,12 +59,24 @@ create table if not exists public.opportunities (
   owner_id uuid references public.profiles(id),
   title text not null,
   status public.opportunity_status not null default 'open',
+  base_amount numeric(12,2) not null default 0,
+  is_recurring boolean not null default false,
+  months integer not null default 1 check (months >= 1),
   amount numeric(12,2) not null default 0,
   expected_close_date date,
   loss_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.opportunities
+  add column if not exists base_amount numeric(12,2) not null default 0;
+
+alter table public.opportunities
+  add column if not exists is_recurring boolean not null default false;
+
+alter table public.opportunities
+  add column if not exists months integer not null default 1;
 
 create table if not exists public.activities (
   id uuid primary key default gen_random_uuid(),
@@ -92,6 +104,38 @@ create table if not exists public.tasks (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.app_settings (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade unique,
+  display_name text,
+  company_name text,
+  features jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  source_key text not null,
+  type text not null,
+  label text not null,
+  title text not null,
+  detail text not null,
+  href text not null,
+  priority text not null check (priority in ('high', 'medium', 'info')),
+  entity_type text,
+  entity_id text,
+  is_read boolean not null default false,
+  read_at timestamptz,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, user_id, source_key)
+);
+
 create or replace function public.current_profile_org()
 returns uuid
 language sql
@@ -110,6 +154,8 @@ alter table public.pipeline_stages enable row level security;
 alter table public.opportunities enable row level security;
 alter table public.activities enable row level security;
 alter table public.tasks enable row level security;
+alter table public.app_settings enable row level security;
+alter table public.notifications enable row level security;
 
 create policy "profiles select same org"
 on public.profiles
@@ -170,3 +216,15 @@ on public.tasks
 for all
 using (organization_id = public.current_profile_org())
 with check (organization_id = public.current_profile_org());
+
+create policy "org scoped app settings"
+on public.app_settings
+for all
+using (organization_id = public.current_profile_org() and user_id = auth.uid())
+with check (organization_id = public.current_profile_org() and user_id = auth.uid());
+
+create policy "org scoped notifications"
+on public.notifications
+for all
+using (organization_id = public.current_profile_org() and user_id = auth.uid())
+with check (organization_id = public.current_profile_org() and user_id = auth.uid());

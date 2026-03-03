@@ -10,27 +10,34 @@ export const roleLabels: Record<AppRole, string> = {
 
 const rolePermissions: Record<AppRole, string[]> = {
   admin: [
+    "accounts:view",
     "accounts:write",
     "contacts:write",
     "dashboard:view",
     "opportunities:write",
     "pipeline:write",
     "settings:write",
+    "tasks:write",
+    "records:edit",
     "team:manage"
   ],
   manager: [
+    "accounts:view",
     "accounts:write",
     "contacts:write",
     "dashboard:view",
     "opportunities:write",
     "pipeline:write",
+    "tasks:write",
+    "records:edit",
     "team:view"
   ],
   sales: [
-    "accounts:write",
+    "accounts:view",
     "contacts:write",
     "dashboard:view",
-    "opportunities:write"
+    "opportunities:write",
+    "tasks:write"
   ]
 };
 

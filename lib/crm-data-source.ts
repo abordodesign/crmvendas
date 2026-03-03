@@ -1,0 +1,2637 @@
+"use client";
+
+import { supabase } from "@/lib/supabase";
+import { getCrmSettings } from "@/lib/crm-settings";
+import {
+  seedActivity,
+  seedAgenda,
+  seedCustomers,
+  seedDashboardData,
+  seedOpportunities,
+  seedTasks
+} from "@/lib/crm-seed";
+import type {
+  ActivityItem,
+  AgendaItem,
+  CustomerItem,
+  DashboardData,
+  NotificationItem,
+  NotificationPriority,
+  OpportunityItem,
+  PipelineColumn,
+  TaskItem
+} from "@/types/crm-app";
+
+type ReferenceOption = {
+  id: string;
+  label: string;
+  searchText?: string;
+};
+
+type StoredNotification = NotificationItem & {
+  resolvedAt?: string | null;
+  entityType?: string;
+  entityId?: string;
+};
+
+type NotificationRuleDraft = {
+  ruleKey: string;
+  type: string;
+  label: string;
+  title: string;
+  detail: string;
+  href: string;
+  priority: NotificationPriority;
+  entityType?: string;
+  entityId?: string;
+};
+
+const LOCAL_OPPORTUNITIES_KEY = "crm_local_opportunity_previews";
+const LOCAL_CUSTOMERS_KEY = "crm_local_customers";
+const LOCAL_ACTIVITY_KEY = "crm_local_activity";
+const LOCAL_AGENDA_KEY = "crm_local_agenda";
+const LOCAL_NOTIFICATIONS_KEY = "crm_local_notifications";
+const CRM_DATA_CHANGED_EVENT = "crm:data-changed";
+const STAGE_NOTE_PREFIX = "stage_move:";
+const AUDIT_NOTE_PREFIX = "audit:";
+export const DEFAULT_STAGE_OPTIONS: ReferenceOption[] = [
+  { id: "prospect", label: "Prospect" },
+  { id: "qualified", label: "Qualificado" },
+  { id: "presentation", label: "Apresentacao" },
+  { id: "proposal", label: "Proposta" },
+  { id: "negotiation", label: "Negociacao" },
+  { id: "conclusion", label: "Conclusao" }
+];
+
+export const CONCLUSION_STATUS_OPTIONS: ReferenceOption[] = [
+  { id: "ativo", label: "Ativo" },
+  { id: "cancelado", label: "Cancelado" },
+  { id: "suspenso", label: "Suspenso" },
+  { id: "conquistado", label: "Conquistado" }
+];
+
+export const CONCLUSION_REASON_OPTIONS: ReferenceOption[] = [
+  { id: "negocio-fechado", label: "Negocio Fechado" },
+  { id: "oportunidade-nunca-existiu", label: "Oportunidade Nunca Existiu" },
+  { id: "perdido", label: "Perdido" },
+  { id: "projeto-futuro", label: "Projeto Futuro" }
+];
+
+export function isConclusionStage(stage: string | null | undefined) {
+  return (stage ?? "").trim().toLowerCase() === "conclusao";
+}
+
+function pickOne<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return value ?? null;
+}
+
+function getLocalOpportunityPreviews(): OpportunityItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_OPPORTUNITIES_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as OpportunityItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLocalCustomers(): CustomerItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_CUSTOMERS_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as CustomerItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLocalActivity(): ActivityItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_ACTIVITY_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as ActivityItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLocalAgenda(): AgendaItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_AGENDA_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as AgendaItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function getLocalNotifications(): StoredNotification[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_NOTIFICATIONS_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as StoredNotification[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalNotifications(items: StoredNotification[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(LOCAL_NOTIFICATIONS_KEY, JSON.stringify(items));
+  notifyCrmDataChanged();
+}
+
+function saveLocalNotificationsIfChanged(items: StoredNotification[]) {
+  const current = getLocalNotifications();
+
+  if (JSON.stringify(current) === JSON.stringify(items)) {
+    return;
+  }
+
+  saveLocalNotifications(items);
+}
+
+function saveLocalAgenda(items: AgendaItem[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(LOCAL_AGENDA_KEY, JSON.stringify(items));
+  notifyCrmDataChanged();
+}
+
+function saveLocalActivity(item: ActivityItem) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const current = getLocalActivity();
+  const next = [item, ...current].slice(0, 8);
+  window.localStorage.setItem(LOCAL_ACTIVITY_KEY, JSON.stringify(next));
+  notifyCrmDataChanged();
+}
+
+export async function clearCrmOperationalData(): Promise<{
+  ok: boolean;
+  remoteCleared: boolean;
+  message: string;
+}> {
+  if (typeof window !== "undefined") {
+    [
+      LOCAL_OPPORTUNITIES_KEY,
+      LOCAL_CUSTOMERS_KEY,
+      LOCAL_ACTIVITY_KEY,
+      LOCAL_AGENDA_KEY,
+      LOCAL_NOTIFICATIONS_KEY
+    ].forEach((key) => window.localStorage.removeItem(key));
+  }
+
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    notifyCrmDataChanged();
+    return {
+      ok: true,
+      remoteCleared: false,
+      message: "Dados locais limpos. Nao havia sessao autenticada para limpar o Supabase."
+    };
+  }
+
+  try {
+    await supabase.from("notifications").delete().not("id", "is", null);
+    await supabase.from("activities").delete().not("id", "is", null);
+    await supabase.from("tasks").delete().not("id", "is", null);
+    await supabase.from("opportunities").delete().not("id", "is", null);
+    await supabase.from("contacts").delete().not("id", "is", null);
+    await supabase.from("accounts").delete().not("id", "is", null);
+    notifyCrmDataChanged();
+
+    return {
+      ok: true,
+      remoteCleared: true,
+      message: "Dados locais e operacionais do Supabase foram limpos."
+    };
+  } catch {
+    notifyCrmDataChanged();
+    return {
+      ok: true,
+      remoteCleared: false,
+      message: "Dados locais limpos. A limpeza do Supabase nao foi concluida com a sessao atual."
+    };
+  }
+}
+
+function buildRelativeActivity(createdAt: string | null | undefined) {
+  return formatRelative(createdAt);
+}
+
+function parseStageMovement(notes: string | null | undefined) {
+  if (!notes) {
+    return null;
+  }
+
+  if (notes.startsWith("stage:")) {
+    return {
+      fromStage: "",
+      toStage: notes.slice("stage:".length)
+    };
+  }
+
+  if (!notes.startsWith(STAGE_NOTE_PREFIX)) {
+    return null;
+  }
+
+  const payload = notes.slice(STAGE_NOTE_PREFIX.length);
+  const [fromStage = "", toStage = ""] = payload.split("||");
+
+  return {
+    fromStage,
+    toStage
+  };
+}
+
+function parseAuditEvent(notes: string | null | undefined) {
+  if (!notes?.startsWith(AUDIT_NOTE_PREFIX)) {
+    return null;
+  }
+
+  const payload = notes.slice(AUDIT_NOTE_PREFIX.length);
+  const [eventType = "interaction", action = "", target = ""] = payload.split("||");
+
+  return {
+    eventType: eventType as ActivityItem["eventType"],
+    action,
+    target
+  };
+}
+
+function saveLocalCustomer(item: CustomerItem) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const current = getLocalCustomers();
+  const next = [item, ...current.filter((entry) => entry.id !== item.id)];
+  window.localStorage.setItem(LOCAL_CUSTOMERS_KEY, JSON.stringify(next));
+  notifyCrmDataChanged();
+}
+
+function mergeCustomers(remote: CustomerItem[], local: CustomerItem[]) {
+  const byId = new Map<string, CustomerItem>();
+
+  remote.forEach((item) => byId.set(item.id, item));
+  local.forEach((item) => byId.set(item.id, item));
+
+  return Array.from(byId.values());
+}
+
+function mergeOpportunities(primary: OpportunityItem[], secondary: OpportunityItem[]) {
+  const byId = new Map<string, OpportunityItem>();
+
+  secondary.forEach((item) => byId.set(item.id, item));
+  primary.forEach((item) => byId.set(item.id, item));
+
+  return Array.from(byId.values());
+}
+
+export function notifyCrmDataChanged() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new Event(CRM_DATA_CHANGED_EVENT));
+}
+
+export function subscribeCrmDataChanged(callback: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+
+  window.addEventListener(CRM_DATA_CHANGED_EVENT, callback);
+  window.addEventListener("storage", callback);
+
+  return () => {
+    window.removeEventListener(CRM_DATA_CHANGED_EVENT, callback);
+    window.removeEventListener("storage", callback);
+  };
+}
+
+function saveLocalOpportunityPreview(item: OpportunityItem) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const current = getLocalOpportunityPreviews();
+  const next = [item, ...current.filter((entry) => entry.id !== item.id)];
+  window.localStorage.setItem(LOCAL_OPPORTUNITIES_KEY, JSON.stringify(next));
+  notifyCrmDataChanged();
+}
+
+function updateLocalOpportunityPreview(item: OpportunityItem) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const current = getLocalOpportunityPreviews();
+  const hasExisting = current.some((entry) => entry.id === item.id);
+  const next = hasExisting ? current.map((entry) => (entry.id === item.id ? item : entry)) : [item, ...current];
+  window.localStorage.setItem(LOCAL_OPPORTUNITIES_KEY, JSON.stringify(next));
+  notifyCrmDataChanged();
+}
+
+function buildPipelineFromOpportunities(items: OpportunityItem[]): PipelineColumn[] {
+  const grouped = new Map<string, PipelineColumn>();
+
+  items.forEach((opportunity) => {
+    const stageKey = opportunity.stage || "Sem etapa";
+
+    if (!grouped.has(stageKey)) {
+      grouped.set(stageKey, {
+        id: stageKey.toLowerCase().replace(/\s+/g, "-"),
+        name: stageKey,
+        total: "R$ 0,00",
+        deals: []
+      });
+    }
+
+    const column = grouped.get(stageKey);
+
+    if (!column) {
+      return;
+    }
+
+    column.deals.push({
+      id: opportunity.id,
+      company: opportunity.company,
+      title: opportunity.title,
+      owner: opportunity.owner,
+      value: opportunity.amount,
+      nextStep: opportunity.nextStep
+    });
+  });
+
+  return Array.from(grouped.values()).map((column) => {
+    const totalValue = column.deals.reduce((sum, deal) => sum + amountLabelToNumber(deal.value), 0);
+
+    return {
+      ...column,
+      total: currency(totalValue)
+    };
+  });
+}
+
+function amountLabelToNumber(value: string) {
+  const normalized = value.replace(/\s/g, "").replace("R$", "").replace(/\./g, "").replace(",", ".");
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function currency(value: number | null | undefined) {
+  if (typeof value !== "number") {
+    return "R$ 0,00";
+  }
+
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
+function formatDate(date: string | null | undefined) {
+  if (!date) {
+    return "Sem data";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return parsed.toLocaleDateString("pt-BR");
+}
+
+function formatDateTime(date: string | null | undefined) {
+  if (!date) {
+    return "Sem data";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return date;
+  }
+
+  return `${parsed.toLocaleDateString("pt-BR")} ${parsed.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  })}`;
+}
+
+function toDateInput(date: string | null | undefined) {
+  if (!date) {
+    return "";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function toTimeInput(date: string | null | undefined) {
+  if (!date) {
+    return "";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+}
+
+function combineDateAndTime(date: string | undefined, time: string | undefined) {
+  if (!date) {
+    return null;
+  }
+
+  const normalizedTime = time || "09:00";
+  return `${date}T${normalizedTime}:00`;
+}
+
+function formatTime(date: string | null | undefined) {
+  if (!date) {
+    return "--:--";
+  }
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "--:--";
+  }
+
+  return parsed.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function formatRelative(date: string | null | undefined) {
+  if (!date) {
+    return "agora";
+  }
+
+  const parsed = new Date(date).getTime();
+
+  if (Number.isNaN(parsed)) {
+    return "agora";
+  }
+
+  const minutes = Math.max(1, Math.round((Date.now() - parsed) / 60000));
+
+  if (minutes < 60) {
+    return `ha ${minutes} min`;
+  }
+
+  const hours = Math.round(minutes / 60);
+  return `ha ${hours} h`;
+}
+
+function parseDisplayDate(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const [day, month, year] = value.split("/");
+
+  if (!day || !month || !year) {
+    return null;
+  }
+
+  const parsed = new Date(`${year}-${month}-${day}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function startOfToday() {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now;
+}
+
+function endOfToday() {
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+  return now;
+}
+
+function createNotificationFromRule(
+  draft: NotificationRuleDraft,
+  persisted?: Partial<StoredNotification>
+): StoredNotification {
+  return {
+    id: persisted?.id ?? `notification-local-${draft.ruleKey}`,
+    ruleKey: draft.ruleKey,
+    label: draft.label,
+    title: draft.title,
+    detail: draft.detail,
+    href: draft.href,
+    priority: draft.priority,
+    isRead: persisted?.isRead ?? false,
+    resolvedAt: null,
+    entityType: draft.entityType,
+    entityId: draft.entityId
+  };
+}
+
+function buildNotificationRules(input: {
+  agenda: AgendaItem[];
+  tasks: TaskItem[];
+  opportunities: OpportunityItem[];
+}): NotificationRuleDraft[] {
+  const now = Date.now();
+  const rules: NotificationRuleDraft[] = [];
+
+  input.agenda
+    .filter((item) => {
+      if (!item.scheduledAt) {
+        return false;
+      }
+
+      const time = new Date(item.scheduledAt).getTime();
+
+      if (Number.isNaN(time)) {
+        return false;
+      }
+
+      const diff = time - now;
+      return diff >= 0 && diff <= 15 * 60 * 1000;
+    })
+    .slice(0, 3)
+    .forEach((item) => {
+      rules.push({
+        ruleKey: `agenda-soon-${item.id}`,
+        type: "agenda_due_soon",
+        label: "Agenda",
+        title: item.title,
+        detail: `${item.time} • compromisso em ate 15 min`,
+        href: "/dashboard/agenda",
+        priority: "high",
+        entityType: "agenda",
+        entityId: item.id
+      });
+    });
+
+  input.tasks
+    .filter((task) => task.dueDate)
+    .slice(0, 8)
+    .forEach((task) => {
+      const time = new Date(`${task.dueDate}T${task.dueTime || "23:59"}:00`).getTime();
+
+      if (Number.isNaN(time)) {
+        return;
+      }
+
+      if (time <= now) {
+        rules.push({
+          ruleKey: `task-overdue-${task.id}`,
+          type: "task_overdue",
+          label: "Tarefa",
+          title: task.title,
+          detail: "Prazo vencido ou imediato",
+          href: "/dashboard/tasks",
+          priority: "high",
+          entityType: "task",
+          entityId: task.id
+        });
+        return;
+      }
+
+      if (time >= startOfToday().getTime() && time <= endOfToday().getTime()) {
+        rules.push({
+          ruleKey: `task-today-${task.id}`,
+          type: "task_today",
+          label: "Tarefa",
+          title: task.title,
+          detail: "Entrega prevista ainda hoje",
+          href: "/dashboard/tasks",
+          priority: "medium",
+          entityType: "task",
+          entityId: task.id
+        });
+      }
+    });
+
+  input.opportunities.slice(0, 12).forEach((item) => {
+    const next = (item.nextStep ?? "").toLowerCase();
+    const hasPlaceholderStep = !next || next.includes("definir") || next.includes("atualizar");
+
+    if (hasPlaceholderStep && ["Negociacao", "Proposta", "Conclusao"].includes(item.stage)) {
+      rules.push({
+        ruleKey: `opportunity-next-step-${item.id}`,
+        type: "opportunity_next_step",
+        label: "Funil",
+        title: item.title,
+        detail: "Proximo passo precisa ser definido",
+        href: `/dashboard/opportunities?focus=${item.id}`,
+        priority: item.stage === "Negociacao" ? "high" : "medium",
+        entityType: "opportunity",
+        entityId: item.id
+      });
+    }
+
+    const closingDate = parseDisplayDate(item.expectedCloseDate);
+
+    if (!closingDate) {
+      return;
+    }
+
+    const diffDays = Math.ceil((closingDate.getTime() - now) / 86400000);
+
+    if (diffDays >= 0 && diffDays <= 3 && item.stage !== "Conclusao") {
+      rules.push({
+        ruleKey: `opportunity-close-${item.id}`,
+        type: "opportunity_closing_soon",
+        label: "Fechamento",
+        title: item.title,
+        detail: `Previsao de fechamento em ${item.expectedCloseDate}`,
+        href: `/dashboard/opportunities?focus=${item.id}`,
+        priority: "high",
+        entityType: "opportunity",
+        entityId: item.id
+      });
+    }
+  });
+
+  return rules;
+}
+
+function resolveCurrentUserLabel(
+  currentContext: Awaited<ReturnType<typeof getCurrentUserContext>>,
+  targetUserId: string | null | undefined,
+  fallbackName: string | null | undefined
+) {
+  if (currentContext?.userId && targetUserId && currentContext.userId === targetUserId) {
+    return currentContext.fullName;
+  }
+
+  return fallbackName ?? "Equipe";
+}
+
+function sortActivityByDateDesc(left: ActivityItem, right: ActivityItem) {
+  const leftTime = left.createdAt ? new Date(left.createdAt).getTime() : 0;
+  const rightTime = right.createdAt ? new Date(right.createdAt).getTime() : 0;
+  return rightTime - leftTime;
+}
+
+function sortAgendaByDateAsc(left: AgendaItem, right: AgendaItem) {
+  const leftTime = left.scheduledAt ? new Date(left.scheduledAt).getTime() : 0;
+  const rightTime = right.scheduledAt ? new Date(right.scheduledAt).getTime() : 0;
+  return leftTime - rightTime;
+}
+
+function mergeAgendaItems(primary: AgendaItem[], secondary: AgendaItem[]) {
+  const byId = new Map<string, AgendaItem>();
+
+  secondary.forEach((item) => byId.set(item.id, item));
+  primary.forEach((item) => byId.set(item.id, item));
+
+  return Array.from(byId.values()).sort(sortAgendaByDateAsc);
+}
+
+function mapAgendaItem(activity: {
+  id: string;
+  subject: string;
+  notes: string | null;
+  kind?: string | null;
+  scheduled_for: string | null;
+  accounts?: Array<{ id?: string; trade_name?: string; legal_name?: string }>;
+  opportunities?: Array<{ id?: string; title?: string }>;
+}): AgendaItem {
+  const account = pickOne(activity.accounts);
+  const opportunity = pickOne(activity.opportunities);
+
+  return {
+    id: activity.id,
+    time: formatTime(activity.scheduled_for),
+    title: activity.subject,
+    note: activity.notes || (account?.trade_name ?? account?.legal_name ?? "Sem observacao"),
+    scheduledAt: activity.scheduled_for ?? undefined,
+    category: agendaCategoryFromKind(activity.kind),
+    accountId: account?.id,
+    accountName: account?.trade_name ?? account?.legal_name,
+    opportunityId: opportunity?.id,
+    opportunityTitle: opportunity?.title
+  };
+}
+
+function agendaCategoryFromKind(kind: string | null | undefined) {
+  if (kind === "call") {
+    return "Ligacao";
+  }
+
+  if (kind === "email") {
+    return "E-mail";
+  }
+
+  if (kind === "note") {
+    return "Follow-up";
+  }
+
+  return "Reuniao";
+}
+
+function agendaKindFromCategory(category: string | undefined) {
+  if (category === "Ligacao") {
+    return "call" as const;
+  }
+
+  if (category === "E-mail") {
+    return "email" as const;
+  }
+
+  if (category === "Follow-up") {
+    return "note" as const;
+  }
+
+  return "meeting" as const;
+}
+
+export async function getDashboardData(): Promise<DashboardData> {
+  const localPreviews = getLocalOpportunityPreviews();
+  const localActivity = getLocalActivity();
+  const localAgenda = getLocalAgenda();
+  const currentContext = await getCurrentUserContext();
+
+  try {
+    const [stagesRes, opportunitiesRes, tasksRes, activitiesRes, agendaRes, accountsRes] = await Promise.all([
+      supabase.from("pipeline_stages").select("id, name, stage_order"),
+      supabase
+        .from("opportunities")
+        .select(
+          "id, title, amount, base_amount, is_recurring, months, stage_id, owner_id, status, expected_close_date, accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+        )
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("tasks")
+        .select(
+          "id, title, due_at, is_done, opportunities:opportunity_id(title, accounts:account_id(trade_name, legal_name)), profiles:owner_id(full_name)"
+        )
+        .eq("is_done", false)
+        .order("due_at", { ascending: true })
+        .limit(3),
+      supabase
+        .from("activities")
+        .select(
+          "id, subject, notes, created_at, scheduled_for, kind, actor_id, accounts:account_id(trade_name, legal_name), profiles:actor_id(full_name)"
+        )
+        .order("created_at", { ascending: false })
+        .limit(4),
+      supabase
+        .from("activities")
+        .select(
+          "id, subject, notes, kind, scheduled_for, accounts:account_id(id, trade_name, legal_name), opportunities:opportunity_id(id, title)"
+        )
+        .not("scheduled_for", "is", null)
+        .order("scheduled_for", { ascending: true })
+        .limit(6),
+      supabase.from("accounts").select("id")
+    ]);
+
+    if (
+      stagesRes.error ||
+      opportunitiesRes.error ||
+      tasksRes.error ||
+      activitiesRes.error ||
+      agendaRes.error ||
+      accountsRes.error ||
+      !stagesRes.data
+    ) {
+      if (localPreviews.length) {
+        const merged = mergeOpportunities(localPreviews, seedOpportunities);
+        const pipeline = buildPipelineFromOpportunities(merged);
+        const totalPipeline = merged.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+        const recurringTotal = merged
+          .filter((item) => item.isRecurring)
+          .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+        const averageTicket = merged.length ? totalPipeline / merged.length : 0;
+
+        return {
+          ...seedDashboardData,
+          kpis: [
+            { label: "Pipeline total", value: currency(totalPipeline), trend: `${merged.length} oportunidades` },
+            { label: "Ticket medio", value: currency(averageTicket), trend: "Media por oportunidade" },
+            {
+              label: "Receita recorrente",
+              value: currency(recurringTotal),
+              trend: recurringTotal ? "Contratos recorrentes no funil" : "Sem contratos recorrentes"
+            },
+            seedDashboardData.kpis[3]
+          ],
+          pipeline,
+          agenda: mergeAgendaItems(localAgenda, seedAgenda).slice(0, 6),
+          activity: [...localActivity, ...seedActivity].sort(sortActivityByDateDesc).slice(0, 6)
+        };
+      }
+
+      return {
+        ...seedDashboardData,
+        agenda: mergeAgendaItems(localAgenda, seedAgenda).slice(0, 6),
+        activity: [...localActivity, ...seedActivity].sort(sortActivityByDateDesc).slice(0, 6)
+      };
+    }
+
+    const stageNames = new Map<string, string>(
+      stagesRes.data.map((stage) => [stage.id, stage.name])
+    );
+
+    const grouped = new Map<string, PipelineColumn>();
+
+    opportunitiesRes.data?.forEach((opportunity) => {
+      const stageId = opportunity.stage_id ?? "sem-etapa";
+      const stageName = stageNames.get(stageId) ?? "Sem etapa";
+      const account = pickOne(opportunity.accounts);
+      const owner = pickOne(opportunity.profiles);
+
+      if (!grouped.has(stageId)) {
+        grouped.set(stageId, {
+          id: stageId,
+          name: stageName,
+          total: "R$ 0",
+          deals: []
+        });
+      }
+
+      const column = grouped.get(stageId);
+
+      if (!column) {
+        return;
+      }
+
+      column.deals.push({
+        id: opportunity.id,
+        title: opportunity.title,
+        company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
+        owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
+        value: currency(opportunity.amount)
+      });
+    });
+
+    const pipeline = Array.from(grouped.values()).map((column) => {
+      const totalValue = column.deals.reduce((sum, deal) => {
+        const numeric = Number(deal.value.replace(/[^\d,-]/g, "").replace(".", "").replace(",", "."));
+        return sum + (Number.isFinite(numeric) ? numeric : 0);
+      }, 0);
+
+      return {
+        ...column,
+        total: currency(totalValue)
+      };
+    });
+
+    const tasks: TaskItem[] =
+      tasksRes.data?.map((task) => {
+        const opportunity = pickOne(task.opportunities);
+        const account = pickOne(opportunity?.accounts);
+
+        return {
+          id: task.id,
+          title: task.title,
+          company: account?.trade_name ?? account?.legal_name ?? opportunity?.title ?? "Sem conta",
+          due: formatDateTime(task.due_at),
+          priority: "Media",
+          dueDate: toDateInput(task.due_at),
+          dueTime: toTimeInput(task.due_at)
+        };
+      }) ?? seedTasks;
+
+    const agenda: AgendaItem[] = agendaRes.data?.filter((activity) => Boolean(activity.scheduled_for)).map(mapAgendaItem) ?? seedAgenda;
+
+    const activity: ActivityItem[] =
+      activitiesRes.data?.map((item): ActivityItem => {
+        const actor = pickOne(item.profiles);
+        const account = pickOne(item.accounts);
+        const move = parseStageMovement(item.notes);
+        const audit = parseAuditEvent(item.notes);
+
+        if (move) {
+          return {
+            id: item.id,
+            actor: resolveCurrentUserLabel(currentContext, item.actor_id, actor?.full_name),
+            action: `moveu ${item.subject} de ${move.fromStage || "Sem etapa"} para`,
+            target: move.toStage || "Sem etapa",
+            when: formatRelative(item.created_at),
+            createdAt: item.created_at,
+            eventType: "movement"
+          };
+        }
+
+        if (audit) {
+          return {
+            id: item.id,
+            actor: resolveCurrentUserLabel(currentContext, item.actor_id, actor?.full_name),
+            action: audit.action,
+            target: audit.target,
+            when: formatRelative(item.created_at),
+            createdAt: item.created_at,
+            eventType: audit.eventType
+          };
+        }
+
+        return {
+          id: item.id,
+          actor: actor?.full_name ?? "Equipe",
+          action: item.kind === "task" ? "criou atividade em" : "registrou interacao em",
+          target: account?.trade_name ?? account?.legal_name ?? item.subject,
+          when: formatRelative(item.created_at),
+          createdAt: item.created_at,
+          eventType: item.kind === "task" ? "task" : "interaction"
+        };
+      }) ?? seedActivity;
+
+    const opportunityCount = opportunitiesRes.data?.length ?? 0;
+    const accountsCount = accountsRes.data?.length ?? 0;
+    const totalPipeline = opportunitiesRes.data?.reduce(
+      (sum, opportunity) => sum + (typeof opportunity.amount === "number" ? opportunity.amount : 0),
+      0
+    ) ?? 0;
+
+    const fetchedOpportunities =
+      opportunitiesRes.data?.map((opportunity) => {
+        const stage = stageNames.get(opportunity.stage_id ?? "") ?? "Sem etapa";
+        const account = pickOne(opportunity.accounts);
+        const owner = pickOne(opportunity.profiles);
+
+        return {
+          id: opportunity.id,
+          title: opportunity.title,
+          company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
+          stage,
+          owner: owner?.full_name ?? "Sem responsavel",
+          nextStep: "Atualizar proximo passo",
+          baseAmount: currency(opportunity.base_amount),
+          isRecurring: Boolean(opportunity.is_recurring),
+          months: opportunity.months ?? 1,
+          amount: currency(opportunity.amount),
+          expectedCloseDate: formatDate(opportunity.expected_close_date),
+          status: opportunity.status ?? "Em andamento"
+        };
+      }) ?? [];
+
+    const mergedOpportunities = mergeOpportunities(localPreviews, fetchedOpportunities);
+    const mergedPipeline = mergedOpportunities.length ? buildPipelineFromOpportunities(mergedOpportunities) : [];
+    const mergedTotal = mergedOpportunities.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+    const recurringTotal = mergedOpportunities
+      .filter((item) => item.isRecurring)
+      .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+    const averageTicket = mergedOpportunities.length ? mergedTotal / mergedOpportunities.length : 0;
+
+    return {
+      kpis: [
+        {
+          label: "Pipeline total",
+          value: currency(mergedOpportunities.length ? mergedTotal : totalPipeline),
+          trend: `${mergedOpportunities.length || opportunityCount} oportunidades`
+        },
+        {
+          label: "Ticket medio",
+          value: currency(averageTicket),
+          trend: `${accountsCount} contas no CRM`
+        },
+        {
+          label: "Receita recorrente",
+          value: currency(recurringTotal),
+          trend: mergedOpportunities.some((item) => item.isRecurring)
+            ? "Contratos recorrentes no funil"
+            : "Sem contratos recorrentes"
+        },
+        {
+          label: "Tarefas em aberto",
+          value: String(tasks.length),
+          trend: tasks.length ? "Acompanhamento ativo" : "Sem pendencias"
+        }
+      ],
+      pipeline: mergedPipeline.length ? mergedPipeline : pipeline.length ? pipeline : seedDashboardData.pipeline,
+      tasks: tasks.length ? tasks : seedTasks,
+      agenda: mergeAgendaItems(localAgenda, agenda.length ? agenda : seedAgenda).slice(0, 6),
+      activity: [...localActivity, ...(activity.length ? activity : seedActivity)].sort(sortActivityByDateDesc).slice(0, 6)
+    };
+  } catch {
+    return {
+      ...seedDashboardData,
+      agenda: mergeAgendaItems(localAgenda, seedAgenda).slice(0, 6),
+      activity: [...localActivity, ...seedActivity].sort(sortActivityByDateDesc).slice(0, 6)
+    };
+  }
+}
+
+export async function getCustomers(): Promise<CustomerItem[]> {
+  const localCustomers = getLocalCustomers();
+  const currentContext = await getCurrentUserContext();
+
+  try {
+    const { data, error } = await supabase
+      .from("accounts")
+      .select("id, legal_name, trade_name, segment, owner_id, contacts(id), profiles:owner_id(full_name)")
+      .order("created_at", { ascending: false });
+
+    if (error || !data) {
+      return mergeCustomers(seedCustomers, localCustomers);
+    }
+
+    const remoteCustomers = data.map((account) => {
+      const owner = pickOne(account.profiles);
+      const contacts = Array.isArray(account.contacts) ? account.contacts.length : 0;
+
+      return {
+        id: account.id,
+        legalName: account.legal_name ?? "Sem razao social",
+        tradeName: account.trade_name ?? account.legal_name ?? "Sem nome fantasia",
+        segment: account.segment ?? "Nao informado",
+        phone: "",
+        email: "",
+        address: "",
+        city: "",
+        state: "",
+        zipCode: "",
+        document: "",
+        owner: resolveCurrentUserLabel(currentContext, account.owner_id, owner?.full_name ?? "Sem responsavel"),
+        contacts,
+        status: "Ativo"
+      };
+    });
+
+    return mergeCustomers(remoteCustomers, localCustomers);
+  } catch {
+    return mergeCustomers(seedCustomers, localCustomers);
+  }
+}
+
+export async function getOpportunities(): Promise<OpportunityItem[]> {
+  const localPreviews = getLocalOpportunityPreviews();
+  const currentContext = await getCurrentUserContext();
+
+  try {
+    const { data, error } = await supabase
+      .from("opportunities")
+      .select(
+        "id, title, amount, base_amount, is_recurring, months, owner_id, status, expected_close_date, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+      )
+      .order("created_at", { ascending: false });
+
+    if (error || !data) {
+      return localPreviews.length ? mergeOpportunities(localPreviews, seedOpportunities) : seedOpportunities;
+    }
+
+    const fetched = data.map((opportunity) => {
+      const stage = pickOne(opportunity.pipeline_stages);
+      const account = pickOne(opportunity.accounts);
+      const owner = pickOne(opportunity.profiles);
+
+      return {
+        id: opportunity.id,
+        title: opportunity.title,
+        company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
+        stage: stage?.name ?? "Sem etapa",
+        owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
+        nextStep: "Atualizar proximo passo",
+        baseAmount: currency(opportunity.base_amount),
+        isRecurring: Boolean(opportunity.is_recurring),
+        months: opportunity.months ?? 1,
+        amount: currency(opportunity.amount),
+        expectedCloseDate: formatDate(opportunity.expected_close_date),
+        status: opportunity.status ?? "Em andamento"
+      };
+    });
+
+    return mergeOpportunities(localPreviews, fetched);
+  } catch {
+    return localPreviews.length ? mergeOpportunities(localPreviews, seedOpportunities) : seedOpportunities;
+  }
+}
+
+export async function getTasks(): Promise<TaskItem[]> {
+  try {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select(
+        "id, title, due_at, opportunities:opportunity_id(accounts:account_id(trade_name, legal_name), title)"
+      )
+      .order("due_at", { ascending: true });
+
+    if (error || !data) {
+      return seedTasks;
+    }
+
+    return data.map((task) => {
+      const opportunity = pickOne(task.opportunities);
+      const account = pickOne(opportunity?.accounts);
+
+      return {
+        id: task.id,
+        title: task.title,
+        company: account?.trade_name ?? account?.legal_name ?? opportunity?.title ?? "Sem conta",
+        due: formatDateTime(task.due_at),
+        priority: "Media",
+        dueDate: toDateInput(task.due_at),
+        dueTime: toTimeInput(task.due_at)
+      };
+    });
+  } catch {
+    return seedTasks;
+  }
+}
+
+async function getCurrentUserContext() {
+  const {
+    data: { session }
+  } = await supabase.auth.getSession();
+
+  const userId = session?.user?.id;
+
+  if (!userId) {
+    return null;
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("organization_id, full_name")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!profile?.organization_id) {
+    return null;
+  }
+
+  const settings = await getCrmSettings();
+  const displayName = settings.displayName?.trim();
+
+  return {
+    userId,
+    organizationId: profile.organization_id,
+    fullName: displayName || profile.full_name || "Equipe"
+  };
+}
+
+async function recordCrmActivity(input: {
+  actor: string;
+  action: string;
+  target: string;
+  eventType: ActivityItem["eventType"];
+  subject: string;
+  kind: "task" | "note";
+  notes?: string;
+  opportunityId?: string;
+  accountId?: string;
+  forceLocal?: boolean;
+}) {
+  const createdAt = new Date().toISOString();
+  const localItem: ActivityItem = {
+    id: `activity-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    actor: input.actor,
+    action: input.action,
+    target: input.target,
+    when: buildRelativeActivity(createdAt),
+    createdAt,
+    eventType: input.eventType
+  };
+
+  if (input.forceLocal) {
+    saveLocalActivity(localItem);
+    return localItem;
+  }
+
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    saveLocalActivity(localItem);
+    return localItem;
+  }
+
+  const { error } = await supabase.from("activities").insert({
+    organization_id: context.organizationId,
+    opportunity_id: input.opportunityId || null,
+    account_id: input.accountId || null,
+    actor_id: context.userId,
+    kind: input.kind,
+    subject: input.subject,
+    notes: input.notes || `${AUDIT_NOTE_PREFIX}${input.eventType || "interaction"}||${input.action}||${input.target}`,
+    completed_at: createdAt
+  });
+
+  if (error) {
+    saveLocalActivity(localItem);
+    return localItem;
+  }
+
+  notifyCrmDataChanged();
+  return localItem;
+}
+
+export async function getReferenceOptions(): Promise<{
+  accounts: ReferenceOption[];
+  stages: ReferenceOption[];
+}> {
+  const localCustomers = getLocalCustomers();
+  const seedAccounts = seedCustomers.map((item) => ({
+    id: item.id,
+    label: item.tradeName || item.legalName || "Conta sem nome",
+    searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
+  }));
+
+  try {
+    const [accountsRes, stagesRes] = await Promise.all([
+      supabase.from("accounts").select("id, trade_name, legal_name").order("created_at", { ascending: false }),
+      supabase.from("pipeline_stages").select("id, name, stage_order").order("stage_order", { ascending: true })
+    ]);
+
+    const remoteAccounts =
+      accountsRes.data?.map((item) => ({
+        id: item.id,
+        label: item.trade_name ?? item.legal_name ?? "Conta sem nome",
+        searchText: [item.trade_name, item.legal_name].filter(Boolean).join(" ").toLowerCase()
+      })) ?? [];
+    const localAccounts = localCustomers.map((item) => ({
+      id: item.id,
+      label: item.tradeName || item.legalName || "Conta sem nome",
+      searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
+    }));
+    const mergedAccounts = Array.from(
+      new Map([...seedAccounts, ...remoteAccounts, ...localAccounts].map((item) => [item.id, item])).values()
+    );
+
+    return {
+      accounts: mergedAccounts,
+      stages:
+        stagesRes.data?.length
+          ? stagesRes.data.map((item) => ({
+              id: item.id,
+              label: item.name
+            }))
+          : DEFAULT_STAGE_OPTIONS
+    };
+  } catch {
+    return {
+      accounts: Array.from(
+        new Map(
+          [
+            ...seedAccounts,
+            ...localCustomers.map((item) => ({
+              id: item.id,
+              label: item.tradeName || item.legalName || "Conta sem nome",
+              searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
+            }))
+          ].map((item) => [item.id, item])
+        ).values()
+      ),
+      stages: DEFAULT_STAGE_OPTIONS
+    };
+  }
+}
+
+export async function createCustomer(input: {
+  legalName: string;
+  tradeName: string;
+  segment: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  document: string;
+}): Promise<CustomerItem> {
+  const context = await getCurrentUserContext();
+
+  const fallbackItem: CustomerItem = {
+    id: `local-customer-${Date.now()}`,
+    legalName: input.legalName,
+    tradeName: input.tradeName || input.legalName,
+    segment: input.segment || "Nao informado",
+    phone: input.phone,
+    email: input.email,
+    address: input.address,
+    city: input.city,
+    state: input.state,
+    zipCode: input.zipCode,
+    document: input.document,
+    owner: context?.fullName ?? "Equipe",
+    contacts: 0,
+    status: "Ativo"
+  };
+
+  if (!context) {
+    saveLocalCustomer(fallbackItem);
+    await recordCrmActivity({
+      actor: fallbackItem.owner,
+      action: "criou cliente",
+      target: fallbackItem.tradeName,
+      eventType: "customer",
+      subject: fallbackItem.tradeName,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("accounts")
+    .insert({
+      organization_id: context.organizationId,
+      legal_name: input.legalName,
+      trade_name: input.tradeName || null,
+      segment: input.segment || null,
+      owner_id: context.userId
+    })
+    .select("id, legal_name, trade_name, segment")
+    .single();
+
+  if (error || !data) {
+    saveLocalCustomer(fallbackItem);
+    return fallbackItem;
+  }
+
+  const customerItem = {
+    id: data.id,
+    legalName: data.legal_name,
+    tradeName: data.trade_name ?? data.legal_name,
+    segment: data.segment ?? "Nao informado",
+    phone: input.phone,
+    email: input.email,
+    address: input.address,
+    city: input.city,
+    state: input.state,
+    zipCode: input.zipCode,
+    document: input.document,
+    owner: context.fullName,
+    contacts: 0,
+    status: "Ativo"
+  };
+
+  saveLocalCustomer(customerItem);
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: "criou cliente",
+    target: customerItem.tradeName,
+    eventType: "customer",
+    subject: customerItem.tradeName,
+    kind: "note",
+    accountId: customerItem.id
+  });
+  return customerItem;
+}
+
+export async function updateCustomer(input: {
+  id: string;
+  legalName: string;
+  tradeName: string;
+  segment: string;
+  phone: string;
+  email: string;
+  address: string;
+  city: string;
+  state: string;
+  zipCode: string;
+  document: string;
+}): Promise<CustomerItem> {
+  const context = await getCurrentUserContext();
+
+  const fallbackItem: CustomerItem = {
+    id: input.id,
+    legalName: input.legalName,
+    tradeName: input.tradeName || input.legalName,
+    segment: input.segment || "Nao informado",
+    phone: input.phone,
+    email: input.email,
+    address: input.address,
+    city: input.city,
+    state: input.state,
+    zipCode: input.zipCode,
+    document: input.document,
+    owner: context?.fullName ?? "Equipe",
+    contacts: 0,
+    status: "Ativo"
+  };
+
+  if (!context || input.id.startsWith("local-customer-")) {
+    saveLocalCustomer(fallbackItem);
+    await recordCrmActivity({
+      actor: fallbackItem.owner,
+      action: "editou cliente",
+      target: fallbackItem.tradeName,
+      eventType: "customer",
+      subject: fallbackItem.tradeName,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("accounts")
+    .update({
+      legal_name: input.legalName,
+      trade_name: input.tradeName || null,
+      segment: input.segment || null
+    })
+    .eq("id", input.id)
+    .select("id, legal_name, trade_name, segment")
+    .single();
+
+  if (error || !data) {
+    saveLocalCustomer(fallbackItem);
+    return fallbackItem;
+  }
+
+  const customerItem = {
+    id: data.id,
+    legalName: data.legal_name,
+    tradeName: data.trade_name ?? data.legal_name,
+    segment: data.segment ?? "Nao informado",
+    phone: input.phone,
+    email: input.email,
+    address: input.address,
+    city: input.city,
+    state: input.state,
+    zipCode: input.zipCode,
+    document: input.document,
+    owner: context.fullName,
+    contacts: 0,
+    status: "Ativo"
+  };
+
+  saveLocalCustomer(customerItem);
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: "editou cliente",
+    target: customerItem.tradeName,
+    eventType: "customer",
+    subject: customerItem.tradeName,
+    kind: "note",
+    accountId: customerItem.id
+  });
+  return customerItem;
+}
+
+export async function createOpportunity(input: {
+  title: string;
+  accountId: string;
+  stageId: string;
+  nextStep?: string;
+  amount: number;
+  baseAmount: number;
+  isRecurring: boolean;
+  months: number;
+  expectedCloseDate: string;
+  status?: string;
+  conclusionStatus?: string;
+  conclusionReason?: string;
+  concludedAt?: string;
+  accountLabel?: string;
+  stageLabel?: string;
+}): Promise<OpportunityItem> {
+  const context = await getCurrentUserContext();
+
+  const fallbackItem: OpportunityItem = {
+    id: `local-opportunity-${Date.now()}`,
+    title: input.title,
+    company: input.accountLabel ?? "Conta selecionada",
+    stage: input.stageLabel ?? "Etapa selecionada",
+    owner: context?.fullName ?? "Equipe",
+    nextStep: input.nextStep,
+    baseAmount: currency(input.baseAmount),
+    isRecurring: input.isRecurring,
+    months: input.months,
+    amount: currency(input.amount),
+    expectedCloseDate: formatDate(input.expectedCloseDate),
+    status: input.status ?? "Em andamento",
+    conclusionStatus: input.conclusionStatus,
+    conclusionReason: input.conclusionReason,
+    concludedAt: input.concludedAt
+  };
+
+  if (!context || !input.accountId || !input.stageId) {
+    saveLocalOpportunityPreview(fallbackItem);
+    await recordCrmActivity({
+      actor: fallbackItem.owner,
+      action: "criou oportunidade",
+      target: fallbackItem.title,
+      eventType: "opportunity",
+      subject: fallbackItem.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("opportunities")
+    .insert({
+      organization_id: context.organizationId,
+      account_id: input.accountId,
+      stage_id: input.stageId,
+      owner_id: context.userId,
+      title: input.title,
+      base_amount: input.baseAmount,
+      is_recurring: input.isRecurring,
+      months: input.months,
+      amount: input.amount,
+      expected_close_date: input.expectedCloseDate || null
+    })
+    .select(
+      "id, title, amount, base_amount, is_recurring, months, status, expected_close_date, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
+    )
+    .single();
+
+  if (error || !data) {
+    saveLocalOpportunityPreview(fallbackItem);
+    return fallbackItem;
+  }
+
+  const stage = pickOne(data.pipeline_stages);
+  const account = pickOne(data.accounts);
+
+  const createdItem = {
+    id: data.id,
+    title: data.title,
+    company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
+    stage: stage?.name ?? "Sem etapa",
+    owner: context.fullName,
+    nextStep: input.nextStep,
+    baseAmount: currency(data.base_amount),
+    isRecurring: Boolean(data.is_recurring),
+    months: data.months ?? input.months,
+    amount: currency(data.amount),
+    expectedCloseDate: formatDate(data.expected_close_date),
+    status: input.status ?? data.status ?? "Em andamento",
+    conclusionStatus: input.conclusionStatus,
+    conclusionReason: input.conclusionReason,
+    concludedAt: input.concludedAt
+  };
+
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: "criou oportunidade",
+    target: createdItem.title,
+    eventType: "opportunity",
+    subject: createdItem.title,
+    kind: "note",
+    opportunityId: createdItem.id,
+    accountId: input.accountId
+  });
+  notifyCrmDataChanged();
+  return createdItem;
+}
+
+export async function updateOpportunity(input: {
+  id: string;
+  title: string;
+  stageId?: string;
+  stageLabel?: string;
+  nextStep?: string;
+  amount: number;
+  baseAmount: number;
+  isRecurring: boolean;
+  months: number;
+  expectedCloseDate: string;
+  status?: string;
+  conclusionStatus?: string;
+  conclusionReason?: string;
+  concludedAt?: string;
+  currentCompany: string;
+  currentStage: string;
+}): Promise<OpportunityItem> {
+  const context = await getCurrentUserContext();
+
+  const fallbackItem: OpportunityItem = {
+    id: input.id,
+    title: input.title,
+    company: input.currentCompany,
+    stage: input.stageLabel ?? input.currentStage,
+    owner: context?.fullName ?? "Equipe",
+    nextStep: input.nextStep,
+    baseAmount: currency(input.baseAmount),
+    isRecurring: input.isRecurring,
+    months: input.months,
+    amount: currency(input.amount),
+    expectedCloseDate: formatDate(input.expectedCloseDate),
+    status: input.status ?? "Em andamento",
+    conclusionStatus: input.conclusionStatus,
+    conclusionReason: input.conclusionReason,
+    concludedAt: input.concludedAt
+  };
+
+  if (!context || input.id.startsWith("local-opportunity-")) {
+    updateLocalOpportunityPreview(fallbackItem);
+    await recordCrmActivity({
+      actor: fallbackItem.owner,
+      action: "editou oportunidade",
+      target: fallbackItem.title,
+      eventType: "opportunity",
+      subject: fallbackItem.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("opportunities")
+    .update({
+      title: input.title,
+      stage_id: input.stageId || undefined,
+      base_amount: input.baseAmount,
+      is_recurring: input.isRecurring,
+      months: input.months,
+      amount: input.amount,
+      expected_close_date: input.expectedCloseDate || null
+    })
+    .eq("id", input.id)
+    .select(
+      "id, title, amount, base_amount, is_recurring, months, status, expected_close_date, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
+    )
+    .single();
+
+  if (error || !data) {
+    updateLocalOpportunityPreview(fallbackItem);
+    return fallbackItem;
+  }
+
+  const stage = pickOne(data.pipeline_stages);
+  const account = pickOne(data.accounts);
+
+  const updatedItem = {
+    id: data.id,
+    title: data.title,
+    company: account?.trade_name ?? account?.legal_name ?? input.currentCompany,
+    stage: input.stageLabel ?? stage?.name ?? input.currentStage,
+    owner: context.fullName,
+    nextStep: input.nextStep,
+    baseAmount: currency(data.base_amount),
+    isRecurring: Boolean(data.is_recurring),
+    months: data.months ?? input.months,
+    amount: currency(data.amount),
+    expectedCloseDate: formatDate(data.expected_close_date),
+    status: input.status ?? data.status ?? "Em andamento",
+    conclusionStatus: input.conclusionStatus,
+    conclusionReason: input.conclusionReason,
+    concludedAt: input.concludedAt
+  };
+
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: "editou oportunidade",
+    target: updatedItem.title,
+    eventType: "opportunity",
+    subject: updatedItem.title,
+    kind: "note",
+    opportunityId: updatedItem.id
+  });
+  notifyCrmDataChanged();
+  return updatedItem;
+}
+
+export async function moveOpportunityToStage(input: {
+  opportunityId: string;
+  targetStage: string;
+}): Promise<OpportunityItem | null> {
+  const opportunities = await getOpportunities();
+  const currentItem = opportunities.find((item) => item.id === input.opportunityId);
+
+  if (!currentItem) {
+    return null;
+  }
+
+  const nextItem: OpportunityItem = {
+    ...currentItem,
+    stage: input.targetStage,
+    concludedAt:
+      isConclusionStage(input.targetStage) && !currentItem.concludedAt
+        ? new Date().toISOString()
+        : !isConclusionStage(input.targetStage)
+          ? undefined
+          : currentItem.concludedAt
+  };
+
+  const movementAction = `moveu ${nextItem.title} de ${currentItem.stage || "Sem etapa"} para`;
+
+  updateLocalOpportunityPreview(nextItem);
+
+  if (input.opportunityId.startsWith("local-opportunity-")) {
+    await recordCrmActivity({
+      actor: nextItem.owner || "Equipe",
+      action: movementAction,
+      target: input.targetStage,
+      eventType: "movement",
+      subject: nextItem.title,
+      kind: "note",
+      notes: `${STAGE_NOTE_PREFIX}${currentItem.stage || "Sem etapa"}||${input.targetStage}`,
+      forceLocal: true
+    });
+    return nextItem;
+  }
+
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    await recordCrmActivity({
+      actor: nextItem.owner || "Equipe",
+      action: movementAction,
+      target: input.targetStage,
+      eventType: "movement",
+      subject: nextItem.title,
+      kind: "note",
+      notes: `${STAGE_NOTE_PREFIX}${currentItem.stage || "Sem etapa"}||${input.targetStage}`,
+      forceLocal: true
+    });
+    return nextItem;
+  }
+
+  const { data: stageRow } = await supabase
+    .from("pipeline_stages")
+    .select("id")
+    .eq("name", input.targetStage)
+    .maybeSingle();
+
+  if (!stageRow?.id) {
+    await recordCrmActivity({
+      actor: nextItem.owner || "Equipe",
+      action: movementAction,
+      target: input.targetStage,
+      eventType: "movement",
+      subject: nextItem.title,
+      kind: "note",
+      notes: `${STAGE_NOTE_PREFIX}${currentItem.stage || "Sem etapa"}||${input.targetStage}`,
+      forceLocal: true
+    });
+    return nextItem;
+  }
+
+  const { error } = await supabase
+    .from("opportunities")
+    .update({
+      stage_id: stageRow.id
+    })
+    .eq("id", input.opportunityId);
+
+  if (error) {
+    await recordCrmActivity({
+      actor: nextItem.owner || "Equipe",
+      action: movementAction,
+      target: input.targetStage,
+      eventType: "movement",
+      subject: nextItem.title,
+      kind: "note",
+      notes: `${STAGE_NOTE_PREFIX}${currentItem.stage || "Sem etapa"}||${input.targetStage}`,
+      forceLocal: true
+    });
+    return nextItem;
+  }
+
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: movementAction,
+    target: input.targetStage,
+    eventType: "movement",
+    subject: nextItem.title,
+    kind: "note",
+    notes: `${STAGE_NOTE_PREFIX}${currentItem.stage || "Sem etapa"}||${input.targetStage}`,
+    opportunityId: input.opportunityId
+  });
+
+  notifyCrmDataChanged();
+  return nextItem;
+}
+
+export async function getHistoryActivities(): Promise<ActivityItem[]> {
+  const localActivity = getLocalActivity();
+  const currentContext = await getCurrentUserContext();
+
+  try {
+    const { data, error } = await supabase
+      .from("activities")
+      .select(
+        "id, subject, notes, kind, created_at, actor_id, profiles:actor_id(full_name), accounts:account_id(trade_name, legal_name)"
+      )
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (error || !data) {
+      return [...localActivity, ...seedActivity];
+    }
+
+    const remoteItems: ActivityItem[] = data.map((item): ActivityItem => {
+      const actor = pickOne(item.profiles);
+      const account = pickOne(item.accounts);
+      const move = parseStageMovement(item.notes);
+      const audit = parseAuditEvent(item.notes);
+
+      if (move) {
+        return {
+          id: item.id,
+          actor: resolveCurrentUserLabel(currentContext, item.actor_id, actor?.full_name),
+          action: `moveu ${item.subject} de ${move.fromStage || "Sem etapa"} para`,
+          target: move.toStage || "Sem etapa",
+          when: formatRelative(item.created_at),
+          createdAt: item.created_at,
+          eventType: "movement"
+        };
+      }
+
+      if (audit) {
+        return {
+          id: item.id,
+          actor: resolveCurrentUserLabel(currentContext, item.actor_id, actor?.full_name),
+          action: audit.action,
+          target: audit.target,
+          when: formatRelative(item.created_at),
+          createdAt: item.created_at,
+          eventType: audit.eventType
+        };
+      }
+
+      return {
+        id: item.id,
+        actor: resolveCurrentUserLabel(currentContext, item.actor_id, actor?.full_name),
+        action: item.kind === "task" ? "criou atividade em" : "registrou interacao em",
+        target: account?.trade_name ?? account?.legal_name ?? item.subject,
+        when: formatRelative(item.created_at),
+        createdAt: item.created_at,
+        eventType: item.kind === "task" ? "task" : "interaction"
+      };
+    });
+
+    return [...localActivity, ...remoteItems].sort(sortActivityByDateDesc);
+  } catch {
+    return [...localActivity, ...seedActivity].sort(sortActivityByDateDesc);
+  }
+}
+
+export async function createAgendaEntry(input: {
+  title: string;
+  note: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  category?: string;
+  accountId?: string;
+  opportunityId?: string;
+  accountName?: string;
+  opportunityTitle?: string;
+}): Promise<AgendaItem> {
+  const scheduledAt = combineDateAndTime(input.scheduledDate, input.scheduledTime);
+  const fallbackItem: AgendaItem = {
+    id: `local-agenda-${Date.now()}`,
+    time: input.scheduledTime || formatTime(scheduledAt),
+    title: input.title,
+    note: input.note || "Sem observacao",
+    scheduledAt: scheduledAt ?? undefined,
+    category: input.category || "Reuniao",
+    accountId: input.accountId,
+    accountName: input.accountName,
+    opportunityId: input.opportunityId,
+    opportunityTitle: input.opportunityTitle
+  };
+
+  const context = await getCurrentUserContext();
+
+  if (!context || !scheduledAt) {
+    const next = mergeAgendaItems([fallbackItem], getLocalAgenda());
+    saveLocalAgenda(next);
+    await recordCrmActivity({
+      actor: context?.fullName ?? "Equipe",
+      action: "criou item da agenda",
+      target: input.title,
+      eventType: "interaction",
+      subject: input.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("activities")
+    .insert({
+      organization_id: context.organizationId,
+      actor_id: context.userId,
+        kind: agendaKindFromCategory(input.category),
+        subject: input.title,
+        notes: input.note || null,
+        scheduled_for: scheduledAt,
+        account_id: input.accountId || null,
+        opportunity_id: input.opportunityId || null
+      })
+    .select(
+      "id, subject, notes, kind, scheduled_for, accounts:account_id(id, trade_name, legal_name), opportunities:opportunity_id(id, title)"
+    )
+    .single();
+
+  if (error || !data) {
+    const next = mergeAgendaItems([fallbackItem], getLocalAgenda());
+    saveLocalAgenda(next);
+    await recordCrmActivity({
+      actor: context.fullName,
+      action: "criou item da agenda",
+      target: input.title,
+      eventType: "interaction",
+      subject: input.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const createdItem = mapAgendaItem(data);
+
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: "criou item da agenda",
+    target: createdItem.title,
+    eventType: "interaction",
+    subject: createdItem.title,
+    kind: "note"
+  });
+
+  notifyCrmDataChanged();
+  return createdItem;
+}
+
+export async function updateAgendaEntry(input: {
+  id: string;
+  title: string;
+  note: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  category?: string;
+  accountId?: string;
+  opportunityId?: string;
+  accountName?: string;
+  opportunityTitle?: string;
+}): Promise<AgendaItem> {
+  const scheduledAt = combineDateAndTime(input.scheduledDate, input.scheduledTime);
+  const fallbackItem: AgendaItem = {
+    id: input.id,
+    time: input.scheduledTime || formatTime(scheduledAt),
+    title: input.title,
+    note: input.note || "Sem observacao",
+    scheduledAt: scheduledAt ?? undefined,
+    category: input.category || "Reuniao",
+    accountId: input.accountId,
+    accountName: input.accountName,
+    opportunityId: input.opportunityId,
+    opportunityTitle: input.opportunityTitle
+  };
+
+  const localItems = getLocalAgenda();
+
+  if (input.id.startsWith("local-agenda-") || !scheduledAt) {
+    saveLocalAgenda(mergeAgendaItems([fallbackItem], localItems));
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "editou item da agenda",
+      target: input.title,
+      eventType: "interaction",
+      subject: input.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("activities")
+    .update({
+      subject: input.title,
+      notes: input.note || null,
+      kind: agendaKindFromCategory(input.category),
+      scheduled_for: scheduledAt,
+      account_id: input.accountId || null,
+      opportunity_id: input.opportunityId || null
+    })
+    .eq("id", input.id)
+    .select(
+      "id, subject, notes, kind, scheduled_for, accounts:account_id(id, trade_name, legal_name), opportunities:opportunity_id(id, title)"
+    )
+    .single();
+
+  if (error || !data) {
+    saveLocalAgenda(mergeAgendaItems([fallbackItem], localItems));
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "editou item da agenda",
+      target: input.title,
+      eventType: "interaction",
+      subject: input.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const context = await getCurrentUserContext();
+  const updatedItem = mapAgendaItem(data);
+
+  await recordCrmActivity({
+    actor: context?.fullName ?? "Equipe",
+    action: "editou item da agenda",
+    target: updatedItem.title,
+    eventType: "interaction",
+    subject: updatedItem.title,
+    kind: "note",
+    forceLocal: !context
+  });
+
+  notifyCrmDataChanged();
+  return updatedItem;
+}
+
+export async function deleteAgendaEntry(input: { id: string; title: string }): Promise<boolean> {
+  const localItems = getLocalAgenda();
+
+  if (input.id.startsWith("local-agenda-")) {
+    saveLocalAgenda(localItems.filter((item) => item.id !== input.id));
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "removeu item da agenda",
+      target: input.title,
+      eventType: "interaction",
+      subject: input.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return true;
+  }
+
+  const { error } = await supabase.from("activities").delete().eq("id", input.id);
+
+  if (error) {
+    return false;
+  }
+
+  const context = await getCurrentUserContext();
+  await recordCrmActivity({
+    actor: context?.fullName ?? "Equipe",
+    action: "removeu item da agenda",
+    target: input.title,
+    eventType: "interaction",
+    subject: input.title,
+    kind: "note",
+    forceLocal: !context
+  });
+
+  notifyCrmDataChanged();
+  return true;
+}
+
+export async function getAgendaEntries(): Promise<AgendaItem[]> {
+  const localAgenda = getLocalAgenda();
+
+  try {
+    const { data, error } = await supabase
+      .from("activities")
+      .select(
+        "id, subject, notes, kind, scheduled_for, accounts:account_id(id, trade_name, legal_name), opportunities:opportunity_id(id, title)"
+      )
+      .not("scheduled_for", "is", null)
+      .order("scheduled_for", { ascending: true })
+      .limit(200);
+
+    if (error || !data) {
+      return mergeAgendaItems(localAgenda, seedAgenda);
+    }
+
+    return mergeAgendaItems(localAgenda, data.map(mapAgendaItem));
+  } catch {
+    return mergeAgendaItems(localAgenda, seedAgenda);
+  }
+}
+
+async function syncPersistedNotifications(
+  drafts: NotificationRuleDraft[],
+  context: Awaited<ReturnType<typeof getCurrentUserContext>>
+): Promise<StoredNotification[]> {
+  if (!context) {
+    const current = getLocalNotifications();
+    const currentByRule = new Map(current.map((item) => [item.ruleKey, item]));
+    const activeRuleKeys = new Set(drafts.map((draft) => draft.ruleKey));
+    const resolved = current
+      .filter((item) => !activeRuleKeys.has(item.ruleKey))
+      .map((item) => ({
+        ...item,
+        resolvedAt: item.resolvedAt ?? new Date().toISOString()
+      }));
+    const next = [
+      ...drafts.map((draft) => createNotificationFromRule(draft, currentByRule.get(draft.ruleKey))),
+      ...resolved
+    ];
+    saveLocalNotificationsIfChanged(next);
+    return next;
+  }
+
+  const { data: existing, error: fetchError } = await supabase
+    .from("notifications")
+    .select("id, source_key, label, title, detail, href, priority, is_read, resolved_at")
+    .eq("user_id", context.userId)
+    .is("resolved_at", null);
+
+  if (fetchError) {
+    const current = getLocalNotifications();
+    const currentByRule = new Map(current.map((item) => [item.ruleKey, item]));
+    const activeRuleKeys = new Set(drafts.map((draft) => draft.ruleKey));
+    const resolved = current
+      .filter((item) => !activeRuleKeys.has(item.ruleKey))
+      .map((item) => ({
+        ...item,
+        resolvedAt: item.resolvedAt ?? new Date().toISOString()
+      }));
+    const next = [
+      ...drafts.map((draft) => createNotificationFromRule(draft, currentByRule.get(draft.ruleKey))),
+      ...resolved
+    ];
+    saveLocalNotificationsIfChanged(next);
+    return next;
+  }
+
+  const existingByRule = new Map(
+    (existing ?? []).map((item) => [
+      item.source_key,
+      {
+        id: item.id,
+        ruleKey: item.source_key,
+        label: item.label,
+        title: item.title,
+        detail: item.detail,
+        href: item.href,
+        priority: item.priority as NotificationPriority,
+        isRead: Boolean(item.is_read),
+        resolvedAt: item.resolved_at
+      } satisfies StoredNotification
+    ])
+  );
+
+  if (drafts.length) {
+    await supabase.from("notifications").upsert(
+      drafts.map((draft) => ({
+        organization_id: context.organizationId,
+        user_id: context.userId,
+        source_key: draft.ruleKey,
+        type: draft.type,
+        label: draft.label,
+        title: draft.title,
+        detail: draft.detail,
+        href: draft.href,
+        priority: draft.priority,
+        entity_type: draft.entityType || null,
+        entity_id: draft.entityId || null,
+        resolved_at: null,
+        updated_at: new Date().toISOString()
+      })),
+      { onConflict: "organization_id,user_id,source_key" }
+    );
+  }
+
+  const activeRuleKeys = new Set(drafts.map((draft) => draft.ruleKey));
+  const staleRuleKeys = Array.from(existingByRule.keys()).filter((ruleKey) => !activeRuleKeys.has(ruleKey));
+
+  if (staleRuleKeys.length) {
+    await supabase
+      .from("notifications")
+      .update({
+        is_read: false,
+        read_at: null,
+        resolved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      })
+      .eq("user_id", context.userId)
+      .in("source_key", staleRuleKeys);
+  }
+
+  const { data: fresh, error: freshError } = await supabase
+    .from("notifications")
+    .select("id, source_key, label, title, detail, href, priority, is_read, resolved_at, created_at")
+    .eq("user_id", context.userId)
+    .is("resolved_at", null)
+    .order("created_at", { ascending: false });
+
+  if (freshError || !fresh) {
+    return drafts.map((draft) => createNotificationFromRule(draft, existingByRule.get(draft.ruleKey)));
+  }
+
+  return fresh.map(
+    (item) =>
+      ({
+        id: item.id,
+        ruleKey: item.source_key,
+        label: item.label,
+        title: item.title,
+        detail: item.detail,
+        href: item.href,
+        priority: item.priority as NotificationPriority,
+        isRead: Boolean(item.is_read),
+        resolvedAt: item.resolved_at
+      }) satisfies StoredNotification
+  );
+}
+
+export async function getNotificationItems(): Promise<NotificationItem[]> {
+  const [agenda, tasks, opportunities, context, settings] = await Promise.all([
+    getAgendaEntries(),
+    getTasks(),
+    getOpportunities(),
+    getCurrentUserContext(),
+    getCrmSettings()
+  ]);
+
+  if (!settings.features.notifications_center) {
+    return [];
+  }
+
+  const drafts = buildNotificationRules({
+    agenda,
+    tasks: settings.features.task_reminders ? tasks : [],
+    opportunities
+  }).slice(0, 12);
+  const items = await syncPersistedNotifications(drafts, context);
+
+  return items
+    .filter((item) => !item.resolvedAt)
+    .map((item) => ({
+      id: item.id,
+      ruleKey: item.ruleKey,
+      label: item.label,
+      title: item.title,
+      detail: item.detail,
+      href: item.href,
+      priority: item.priority,
+      isRead: item.isRead
+    }));
+}
+
+export async function markNotificationAsRead(notificationId: string): Promise<boolean> {
+  const localItems = getLocalNotifications();
+  const localMatch = localItems.find((item) => item.id === notificationId);
+
+  if (localMatch) {
+    saveLocalNotifications(
+      localItems.map((item) =>
+        item.id === notificationId
+          ? {
+              ...item,
+              isRead: true
+            }
+          : item
+      )
+    );
+    return true;
+  }
+
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    return false;
+  }
+
+  const { error } = await supabase
+    .from("notifications")
+    .update({
+      is_read: true,
+      read_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", notificationId)
+    .eq("user_id", context.userId);
+
+  if (!error) {
+    notifyCrmDataChanged();
+  }
+
+  return !error;
+}
+
+export async function markAllNotificationsAsRead(): Promise<boolean> {
+  const localItems = getLocalNotifications();
+
+  if (localItems.length) {
+    saveLocalNotifications(
+      localItems.map((item) => ({
+        ...item,
+        isRead: true
+      }))
+    );
+  }
+
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    return localItems.length > 0;
+  }
+
+  const { error } = await supabase
+    .from("notifications")
+    .update({
+      is_read: true,
+      read_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    })
+    .eq("user_id", context.userId)
+    .is("resolved_at", null)
+    .eq("is_read", false);
+
+  if (!error) {
+    notifyCrmDataChanged();
+  }
+
+  return !error;
+}
+
+export async function getNotificationCenterItems(): Promise<StoredNotification[]> {
+  const [agenda, tasks, opportunities, context, settings] = await Promise.all([
+    getAgendaEntries(),
+    getTasks(),
+    getOpportunities(),
+    getCurrentUserContext(),
+    getCrmSettings()
+  ]);
+
+  if (!settings.features.notifications_center) {
+    return [];
+  }
+
+  const drafts = buildNotificationRules({
+    agenda,
+    tasks: settings.features.task_reminders ? tasks : [],
+    opportunities
+  }).slice(0, 12);
+  await syncPersistedNotifications(drafts, context);
+
+  if (!context) {
+    return getLocalNotifications();
+  }
+
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, source_key, label, title, detail, href, priority, is_read, resolved_at, entity_type, entity_id, created_at")
+    .eq("user_id", context.userId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (error || !data) {
+    return getLocalNotifications();
+  }
+
+  return data.map(
+    (item) =>
+      ({
+        id: item.id,
+        ruleKey: item.source_key,
+        label: item.label,
+        title: item.title,
+        detail: item.detail,
+        href: item.href,
+        priority: item.priority as NotificationPriority,
+        isRead: Boolean(item.is_read),
+        resolvedAt: item.resolved_at,
+        entityType: item.entity_type ?? undefined,
+        entityId: item.entity_id ?? undefined
+      }) satisfies StoredNotification
+  );
+}
+
+export async function createTask(input: {
+  title: string;
+  opportunityId?: string;
+  dueDate?: string;
+  dueTime?: string;
+  priority: string;
+  companyLabel?: string;
+}): Promise<TaskItem> {
+  const context = await getCurrentUserContext();
+  const dueAt = combineDateAndTime(input.dueDate, input.dueTime) ?? undefined;
+
+  const fallbackItem: TaskItem = {
+    id: `local-task-${Date.now()}`,
+    title: input.title,
+    company: input.companyLabel ?? "Sem conta",
+    due: formatDateTime(dueAt),
+    priority: input.priority,
+    dueDate: input.dueDate,
+    dueTime: input.dueTime
+  };
+
+  if (!context) {
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "criou tarefa",
+      target: input.title,
+      eventType: "task",
+      subject: input.title,
+      kind: "task",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .insert({
+      organization_id: context.organizationId,
+      opportunity_id: input.opportunityId || null,
+      owner_id: context.userId,
+      title: input.title,
+      due_at: dueAt || null
+    })
+    .select("id, title, due_at")
+    .single();
+
+  if (error || !data) {
+    return fallbackItem;
+  }
+
+  const createdTask = {
+    id: data.id,
+    title: data.title,
+    company: input.companyLabel ?? "Sem conta",
+    due: formatDateTime(data.due_at),
+    priority: input.priority,
+    dueDate: toDateInput(data.due_at),
+    dueTime: toTimeInput(data.due_at)
+  };
+
+  await recordCrmActivity({
+    actor: context.fullName,
+    action: "criou tarefa",
+    target: createdTask.title,
+    eventType: "task",
+    subject: createdTask.title,
+    kind: "task",
+    opportunityId: input.opportunityId
+  });
+
+  return createdTask;
+}
+
+export async function updateTask(input: {
+  id: string;
+  title: string;
+  dueDate?: string;
+  dueTime?: string;
+  priority: string;
+  companyLabel?: string;
+}): Promise<TaskItem> {
+  const dueAt = combineDateAndTime(input.dueDate, input.dueTime) ?? undefined;
+  const fallbackItem: TaskItem = {
+    id: input.id,
+    title: input.title,
+    company: input.companyLabel ?? "Sem conta",
+    due: formatDateTime(dueAt),
+    priority: input.priority,
+    dueDate: input.dueDate,
+    dueTime: input.dueTime
+  };
+
+  if (input.id.startsWith("local-task-")) {
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "editou tarefa",
+      target: input.title,
+      eventType: "task",
+      subject: input.title,
+      kind: "task",
+      forceLocal: true
+    });
+    return fallbackItem;
+  }
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      title: input.title,
+      due_at: dueAt || null
+    })
+    .eq("id", input.id)
+    .select("id, title, due_at")
+    .single();
+
+  if (error || !data) {
+    return fallbackItem;
+  }
+
+  const updatedTask = {
+    id: data.id,
+    title: data.title,
+    company: input.companyLabel ?? "Sem conta",
+    due: formatDateTime(data.due_at),
+    priority: input.priority,
+    dueDate: toDateInput(data.due_at),
+    dueTime: toTimeInput(data.due_at)
+  };
+
+  const context = await getCurrentUserContext();
+  await recordCrmActivity({
+    actor: context?.fullName ?? "Equipe",
+    action: "editou tarefa",
+    target: updatedTask.title,
+    eventType: "task",
+    subject: updatedTask.title,
+    kind: "task",
+    forceLocal: !context
+  });
+
+  return updatedTask;
+}
+
+export async function completeTask(taskId: string, taskTitle?: string): Promise<boolean> {
+  if (taskId.startsWith("local-task-")) {
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "concluiu tarefa",
+      target: taskTitle || taskId,
+      eventType: "task",
+      subject: taskTitle || taskId,
+      kind: "task",
+      forceLocal: true
+    });
+    return true;
+  }
+
+  const { error } = await supabase.from("tasks").update({ is_done: true }).eq("id", taskId);
+
+  if (!error) {
+    const context = await getCurrentUserContext();
+    await recordCrmActivity({
+      actor: context?.fullName ?? "Equipe",
+      action: "concluiu tarefa",
+      target: taskTitle || taskId,
+      eventType: "task",
+      subject: taskTitle || taskId,
+      kind: "task",
+      forceLocal: !context
+    });
+  }
+
+  return !error;
+}
+
