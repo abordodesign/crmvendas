@@ -109,7 +109,8 @@ export function RegisterForm({ nextPath }: { nextPath: string }) {
           display_name: normalizedDisplayName,
           company_name: normalizedCompanyName,
           organization_name: normalizedCompanyName,
-          role: "admin"
+          role: "admin",
+          access_level: "master"
         }
       }
     });

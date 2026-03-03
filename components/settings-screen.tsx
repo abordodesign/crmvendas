@@ -386,7 +386,7 @@ export function SettingsScreen() {
                 >
                   <option value="sales">Comercial</option>
                   <option value="manager">Gestor</option>
-                  <option value="admin">Admin</option>
+                  <option value="admin">Master</option>
                 </select>
               </label>
             </div>

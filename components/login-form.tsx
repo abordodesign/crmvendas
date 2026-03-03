@@ -177,7 +177,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
         }}
       >
         <span>Supabase Auth ativo</span>
-        <span>Perfis: Admin, Gestor, Comercial</span>
+        <span>Perfis: Master, Gestor, Comercial</span>
       </div>
     </section>
   );

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CrmAuthProvider } from "@/components/crm-auth-context";
 import { CrmSettingsProvider } from "@/components/crm-settings-context";
-import { appRoles, type AppRole } from "@/lib/access-control";
+import { type AppRole } from "@/lib/access-control";
 import { defaultCrmSettings, getCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
 import {
   getNotificationItems,
@@ -53,7 +53,7 @@ const notificationModuleOptions = [
 
 function formatRoleLabel(role: AppRole | null) {
   if (role === "admin") {
-    return "Admin";
+    return "Master";
   }
 
   if (role === "manager") {
@@ -65,6 +65,24 @@ function formatRoleLabel(role: AppRole | null) {
   }
 
   return "Sem perfil";
+}
+
+function normalizeAppRole(value: unknown): AppRole | null {
+  const normalizedValue = typeof value === "string" ? value.trim().toLowerCase() : "";
+
+  if (normalizedValue === "master" || normalizedValue === "admin") {
+    return "admin";
+  }
+
+  if (normalizedValue === "manager") {
+    return "manager";
+  }
+
+  if (normalizedValue === "sales") {
+    return "sales";
+  }
+
+  return null;
 }
 
 export function CrmShell({
@@ -109,21 +127,46 @@ export function CrmShell({
         return;
       }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name, role")
-        .eq("id", session.user.id)
-        .maybeSingle();
+      const currentUser = session.user;
+
+      async function fetchProfile() {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, role")
+          .eq("id", currentUser.id)
+          .maybeSingle();
+
+        return profile;
+      }
+
+      let profile = await fetchProfile();
+      let role = normalizeAppRole(profile?.role);
+
+      if (!role) {
+        try {
+          await fetch("/api/auth/bootstrap", {
+            method: "POST",
+            cache: "no-store"
+          });
+        } catch {
+          // Mantemos o fallback abaixo se o bootstrap falhar.
+        }
+
+        profile = await fetchProfile();
+        role = normalizeAppRole(profile?.role);
+      }
 
       if (!isMounted) {
         return;
       }
 
-      const role = appRoles.includes(profile?.role as AppRole) ? (profile?.role as AppRole) : null;
-
       setAuthState({
-        role,
-        fullName: profile?.full_name ?? session.user.email ?? "Equipe",
+        role: role ?? normalizeAppRole(currentUser.user_metadata?.role),
+        fullName:
+          profile?.full_name ??
+          (typeof currentUser.user_metadata?.full_name === "string" ? currentUser.user_metadata.full_name : null) ??
+          currentUser.email ??
+          "Equipe",
         isLoading: false
       });
     }

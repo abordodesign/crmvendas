@@ -79,11 +79,30 @@ async function getCurrentUserContext() {
     return null;
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id")
-    .eq("id", userId)
-    .maybeSingle();
+  async function fetchProfile() {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("organization_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    return profile;
+  }
+
+  let profile = await fetchProfile();
+
+  if (!profile?.organization_id) {
+    try {
+      await fetch("/api/auth/bootstrap", {
+        method: "POST",
+        cache: "no-store"
+      });
+    } catch {
+      // O fallback local continua abaixo se o bootstrap nao responder.
+    }
+
+    profile = await fetchProfile();
+  }
 
   if (!profile?.organization_id) {
     return null;

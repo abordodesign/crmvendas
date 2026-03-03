@@ -1216,11 +1216,30 @@ async function getCurrentUserContext() {
     return null;
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("organization_id, full_name")
-    .eq("id", userId)
-    .maybeSingle();
+  async function fetchProfile() {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("organization_id, full_name")
+      .eq("id", userId)
+      .maybeSingle();
+
+    return profile;
+  }
+
+  let profile = await fetchProfile();
+
+  if (!profile?.organization_id) {
+    try {
+      await fetch("/api/auth/bootstrap", {
+        method: "POST",
+        cache: "no-store"
+      });
+    } catch {
+      // Se o bootstrap falhar, retornamos null no fluxo ja existente.
+    }
+
+    profile = await fetchProfile();
+  }
 
   if (!profile?.organization_id) {
     return null;
