@@ -54,7 +54,13 @@ export function DashboardShell({
   pipeline
 }: DashboardShellProps) {
   return (
-    <main>
+    <main
+      style={{
+        minHeight: "100vh",
+        background:
+          "radial-gradient(circle at top left, rgba(79, 70, 229, 0.08), transparent 24%), radial-gradient(circle at 82% 12%, rgba(20, 184, 166, 0.08), transparent 22%), radial-gradient(circle at 50% 100%, rgba(148, 163, 184, 0.08), transparent 30%), linear-gradient(180deg, var(--background) 0%, var(--background-soft) 100%)"
+      }}
+    >
       <header
         style={{
           position: "sticky",
@@ -337,7 +343,7 @@ export function DashboardShell({
                 flexWrap: "wrap",
                 padding: "14px 18px",
                 borderRadius: 22,
-                background: "#312e81",
+                background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)",
                 color: "#ffffff",
               marginBottom: 18
             }}
@@ -519,7 +525,7 @@ export function DashboardShell({
                           }}
                         >
                           <div>
-                            <strong style={{ color: "#312e81" }}>{column.name}</strong>
+                            <strong style={{ color: "var(--accent-strong)" }}>{column.name}</strong>
                             <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 12 }}>
                               {column.opportunities.length} negocios nesta etapa
                             </div>
