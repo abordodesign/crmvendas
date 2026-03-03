@@ -4,6 +4,20 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+function formatAuthErrorMessage(message: string | null | undefined) {
+  const normalizedMessage = (message ?? "").trim().toLowerCase();
+
+  if (normalizedMessage.includes("email rate limit exceeded")) {
+    return "Limite de envio de e-mails atingido no Supabase. Aguarde a janela do rate limit liberar ou aumente o limite em Authentication > Rate Limits.";
+  }
+
+  if (normalizedMessage.includes("failed to fetch")) {
+    return "Nao foi possivel conectar ao Supabase. Verifique a configuracao das variaveis de ambiente e a conexao de rede.";
+  }
+
+  return message || "Nao foi possivel concluir a operacao.";
+}
+
 export function RegisterForm({ nextPath }: { nextPath: string }) {
   const router = useRouter();
   const submitLockRef = useRef(false);
@@ -48,7 +62,7 @@ export function RegisterForm({ nextPath }: { nextPath: string }) {
     });
 
     if (resendError) {
-      setError(resendError.message || "Nao foi possivel reenviar o e-mail.");
+      setError(formatAuthErrorMessage(resendError.message));
       setIsResendingEmail(false);
       return;
     }
@@ -101,7 +115,7 @@ export function RegisterForm({ nextPath }: { nextPath: string }) {
     });
 
     if (signUpError) {
-      setError(signUpError.message || "Nao foi possivel concluir o cadastro.");
+      setError(formatAuthErrorMessage(signUpError.message));
       submitLockRef.current = false;
       setIsSubmitting(false);
       return;
