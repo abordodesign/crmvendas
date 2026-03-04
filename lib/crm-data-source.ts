@@ -110,6 +110,8 @@ const DEFAULT_STAGE_PROBABILITIES: Record<string, number> = {
   Conclusao: 100
 };
 
+const STAGE_PROGRESS_ORDER = ["Lead", "Qualificacao", "Diagnostico", "Proposta enviada", "Negociacao", "Fechamento"] as const;
+
 export const CONCLUSION_STATUS_OPTIONS: ReferenceOption[] = [
   { id: "ativo", label: "Ativo" },
   { id: "cancelado", label: "Cancelado" },
@@ -197,6 +199,7 @@ function getLocalOpportunityPreviews(): OpportunityItem[] {
       return {
         ...item,
         leadSource: typeof item.leadSource === "string" ? item.leadSource : undefined,
+        createdAt: typeof item.createdAt === "string" ? item.createdAt : undefined,
         stage: normalizedStage,
         probability: Math.max(0, Math.min(100, effectiveProbability)),
         manualProbability: hasManualProbability ? item.manualProbability : undefined
@@ -541,6 +544,10 @@ function removeLocalOpportunityPreview(opportunityId: string) {
   notifyCrmDataChanged();
 }
 
+function existingLocalOpportunityCreatedAt(opportunityId: string) {
+  return getLocalOpportunityPreviews().find((item) => item.id === opportunityId)?.createdAt ?? undefined;
+}
+
 function buildPipelineFromOpportunities(items: OpportunityItem[]): PipelineColumn[] {
   const grouped = new Map<string, PipelineColumn>();
 
@@ -607,6 +614,7 @@ type PipelineStatsSourceOpportunity = {
   probability: number;
   amount: number;
   leadSource?: string;
+  createdAt?: string;
   expectedCloseDate: string | null;
   status: string;
 };
@@ -617,6 +625,7 @@ function normalizePipelineStatsOpportunity(input: {
   probability?: number | null;
   amount: number;
   leadSource?: string;
+  createdAt?: string;
   expectedCloseDate: string | null;
   status: string;
 }): PipelineStatsSourceOpportunity {
@@ -626,6 +635,7 @@ function normalizePipelineStatsOpportunity(input: {
     probability: Math.max(0, Math.min(100, input.probability ?? DEFAULT_STAGE_PROBABILITIES[input.stage] ?? 0)),
     amount: Math.max(0, input.amount),
     leadSource: input.leadSource?.trim() || undefined,
+    createdAt: input.createdAt ?? undefined,
     expectedCloseDate: input.expectedCloseDate,
     status: input.status
   };
@@ -639,8 +649,51 @@ function isSameMonth(date: Date, reference: Date) {
   return date.getFullYear() === reference.getFullYear() && date.getMonth() === reference.getMonth();
 }
 
+function stageProgressIndex(stage: string) {
+  const normalized = normalizeStageLabel(stage);
+  const index = STAGE_PROGRESS_ORDER.indexOf(normalized as (typeof STAGE_PROGRESS_ORDER)[number]);
+  return index >= 0 ? index : -1;
+}
+
+function buildConversionMetrics(items: PipelineStatsSourceOpportunity[]) {
+  const validItems = items.filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost");
+  const totalTracked = validItems.length;
+  const reachedContato = validItems.filter((item) => stageProgressIndex(item.stage) >= 1).length;
+  const reachedProposta = validItems.filter((item) => stageProgressIndex(item.stage) >= 3).length;
+  const reachedVenda = validItems.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length;
+
+  return [
+    {
+      label: "Lead -> Contato",
+      rate: totalTracked ? Math.round((reachedContato / totalTracked) * 100) : 0,
+      converted: reachedContato,
+      base: totalTracked
+    },
+    {
+      label: "Contato -> Proposta",
+      rate: reachedContato ? Math.round((reachedProposta / reachedContato) * 100) : 0,
+      converted: reachedProposta,
+      base: reachedContato
+    },
+    {
+      label: "Proposta -> Venda",
+      rate: reachedProposta ? Math.round((reachedVenda / reachedProposta) * 100) : 0,
+      converted: reachedVenda,
+      base: reachedProposta
+    }
+  ];
+}
+
 function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): PipelineStatistics {
   const openItems = items.filter(isOpenPipelineOpportunity);
+  const currentMonthItems = items.filter((item) => {
+    if (!item.createdAt) {
+      return false;
+    }
+
+    const parsed = new Date(item.createdAt);
+    return !Number.isNaN(parsed.getTime()) && isSameMonth(parsed, new Date());
+  });
   const now = new Date();
   const totalPipeline = openItems.reduce((sum, item) => sum + item.amount, 0);
   const weightedPipeline = openItems.reduce((sum, item) => sum + item.amount * (item.probability / 100), 0);
@@ -695,7 +748,22 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
     leadSources.set(sourceKey, currentSource);
   });
 
+  const sourceConversionBuckets = new Map<string, PipelineStatsSourceOpportunity[]>();
+
+  items
+    .filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost")
+    .forEach((item) => {
+      const sourceKey = item.leadSource?.trim() || "Sem origem";
+      const current = sourceConversionBuckets.get(sourceKey) ?? [];
+      current.push(item);
+      sourceConversionBuckets.set(sourceKey, current);
+    });
+
   return {
+    leadsThisMonth: currentMonthItems.length,
+    opportunitiesCount: items.filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost" && stageProgressIndex(item.stage) >= 1).length,
+    proposalsCount: items.filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost" && stageProgressIndex(item.stage) >= 3).length,
+    salesCount: items.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length,
     totalPipeline,
     weightedPipeline,
     averageProbability,
@@ -709,7 +777,18 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
       .map((item) => ({
         ...item,
         percentage: openItems.length ? Math.round((item.count / openItems.length) * 100) : 0
+      })),
+    conversions: buildConversionMetrics(items),
+    sourceConversions: Array.from(sourceConversionBuckets.entries())
+      .map(([source, bucket]) => ({
+        source,
+        conversions: buildConversionMetrics(bucket)
       }))
+      .sort((left, right) => {
+        const leftBase = left.conversions[0]?.base ?? 0;
+        const rightBase = right.conversions[0]?.base ?? 0;
+        return rightBase - leftBase;
+      })
   };
 }
 
@@ -724,6 +803,7 @@ export async function getPipelineStatistics(): Promise<PipelineStatistics> {
         probability: item.manualProbability ?? item.probability,
         amount: amountLabelToNumber(item.amount),
         leadSource: item.leadSource,
+        createdAt: item.createdAt,
         expectedCloseDate: (() => {
           const parsed = parseDisplayDate(item.expectedCloseDate);
           return parsed ? parsed.toISOString() : null;
@@ -1421,6 +1501,7 @@ export async function getDashboardData(): Promise<DashboardData> {
           title: opportunity.title,
           company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
           leadSource: undefined,
+          createdAt: undefined,
           stage,
           owner: owner?.full_name ?? "Sem responsavel",
           nextStep: "Atualizar proximo passo",
@@ -1539,7 +1620,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
       const primaryQuery = await supabase
         .from("opportunities")
         .select(
-          "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+          "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
         .order("created_at", { ascending: false });
       let data = (primaryQuery.data ?? null) as Array<Record<string, any>> | null;
@@ -1549,7 +1630,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
         const fallbackQuery = await supabase
           .from("opportunities")
           .select(
-            "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+            "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
           )
           .order("created_at", { ascending: false });
 
@@ -1573,12 +1654,17 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
           typeof opportunity === "object" && opportunity && "lead_source" in opportunity
             ? (opportunity as { lead_source?: string | null }).lead_source
             : null;
+        const createdAt =
+          typeof opportunity === "object" && opportunity && "created_at" in opportunity
+            ? (opportunity as { created_at?: string | null }).created_at
+            : null;
 
         return {
           id: opportunity.id,
           title: opportunity.title,
           company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
           leadSource: leadSource ?? undefined,
+          createdAt: createdAt ?? undefined,
           stage: normalizeStageLabel(stage?.name),
           owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
           nextStep: opportunity.next_step ?? "Atualizar proximo passo",
@@ -2143,6 +2229,7 @@ export async function createOpportunity(input: {
     title: input.title,
     company: input.accountLabel ?? "Conta selecionada",
     leadSource: input.leadSource,
+    createdAt: new Date().toISOString(),
     stage: input.stageLabel ?? "Etapa selecionada",
     owner: context?.fullName ?? "Equipe",
     nextStep: input.nextStep,
@@ -2195,7 +2282,7 @@ export async function createOpportunity(input: {
       concluded_at: input.concludedAt || null
     })
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -2212,6 +2299,7 @@ export async function createOpportunity(input: {
     title: data.title,
     company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
     leadSource: data.lead_source ?? undefined,
+    createdAt: data.created_at ?? undefined,
     stage: normalizeStageLabel(stage?.name),
     owner: context.fullName,
     nextStep: data.next_step ?? undefined,
@@ -2272,6 +2360,7 @@ export async function updateOpportunity(input: {
     title: input.title,
     company: input.currentCompany,
     leadSource: input.leadSource,
+    createdAt: existingLocalOpportunityCreatedAt(input.id),
     stage: input.stageLabel ?? input.currentStage,
     owner: context?.fullName ?? "Equipe",
     nextStep: input.nextStep,
@@ -2325,7 +2414,7 @@ export async function updateOpportunity(input: {
     })
     .eq("id", input.id)
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -2342,6 +2431,7 @@ export async function updateOpportunity(input: {
     title: data.title,
     company: account?.trade_name ?? account?.legal_name ?? input.currentCompany,
     leadSource: data.lead_source ?? undefined,
+    createdAt: data.created_at ?? undefined,
     stage: normalizeStageLabel(input.stageLabel ?? stage?.name ?? input.currentStage),
     owner: context.fullName,
     nextStep: data.next_step ?? undefined,

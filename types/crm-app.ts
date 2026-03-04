@@ -89,6 +89,7 @@ export type OpportunityItem = {
   title: string;
   company: string;
   leadSource?: string;
+  createdAt?: string;
   stage: string;
   owner: string;
   nextStep?: string;
@@ -114,6 +115,10 @@ export type DashboardData = {
 };
 
 export type PipelineStatistics = {
+  leadsThisMonth: number;
+  opportunitiesCount: number;
+  proposalsCount: number;
+  salesCount: number;
   totalPipeline: number;
   weightedPipeline: number;
   averageProbability: number;
@@ -133,5 +138,20 @@ export type PipelineStatistics = {
     count: number;
     percentage: number;
     total: number;
+  }>;
+  conversions: Array<{
+    label: string;
+    rate: number;
+    converted: number;
+    base: number;
+  }>;
+  sourceConversions: Array<{
+    source: string;
+    conversions: Array<{
+      label: string;
+      rate: number;
+      converted: number;
+      base: number;
+    }>;
   }>;
 };

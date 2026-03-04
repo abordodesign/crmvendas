@@ -6,6 +6,10 @@ import { getPipelineStatistics } from "@/lib/crm-data-source";
 import type { PipelineStatistics } from "@/types/crm-app";
 
 const emptyStatistics: PipelineStatistics = {
+  leadsThisMonth: 0,
+  opportunitiesCount: 0,
+  proposalsCount: 0,
+  salesCount: 0,
   totalPipeline: 0,
   weightedPipeline: 0,
   averageProbability: 0,
@@ -14,7 +18,9 @@ const emptyStatistics: PipelineStatistics = {
   dueThisMonth: 0,
   nearestCloseDate: null,
   byStage: [],
-  leadSources: []
+  leadSources: [],
+  conversions: [],
+  sourceConversions: []
 };
 
 export function StatisticsScreen() {
@@ -48,6 +54,29 @@ export function StatisticsScreen() {
       <section style={panelStyle}>
         <div style={sectionHeaderStyle}>
           <div>
+            <div style={eyebrowStyle}>Volume do mes</div>
+            <h2 style={titleStyle}>Leads, oportunidades e vendas</h2>
+          </div>
+        </div>
+        <div style={kpiGridStyle}>
+          <MetricCard label="Leads do mes" value={String(stats.leadsThisMonth)} detail="Oportunidades criadas no mes atual." />
+          <MetricCard
+            label="Oportunidades"
+            value={String(stats.opportunitiesCount)}
+            detail="Leads que avancaram para contato/qualificacao."
+          />
+          <MetricCard
+            label="Propostas"
+            value={String(stats.proposalsCount)}
+            detail="Negocios que ja chegaram em proposta enviada."
+          />
+          <MetricCard label="Vendas" value={String(stats.salesCount)} detail="Oportunidades concluidas como ganho." />
+        </div>
+      </section>
+
+      <section style={panelStyle}>
+        <div style={sectionHeaderStyle}>
+          <div>
             <div style={eyebrowStyle}>Indicadores de receita</div>
             <h2 style={titleStyle}>Visao executiva do funil</h2>
           </div>
@@ -65,7 +94,7 @@ export function StatisticsScreen() {
             detail="Media ponderada por valor com base na etapa atual."
           />
           <MetricCard
-            label="Previsao do mes"
+            label="Faturamento previsto"
             value={formatCurrency(stats.forecastMonth)}
             detail="Valor ponderado das oportunidades com fechamento neste mes."
           />
@@ -126,6 +155,30 @@ export function StatisticsScreen() {
       <section style={panelStyle}>
         <div style={sectionHeaderStyle}>
           <div>
+            <div style={eyebrowStyle}>Conversao do funil</div>
+            <h2 style={titleStyle}>Taxa de avanco entre etapas</h2>
+          </div>
+        </div>
+        <div style={conversionGridStyle}>
+          {stats.conversions.map((item) => (
+            <article key={item.label} style={conversionCardStyle}>
+              <div style={cardLabelStyle}>{item.label}</div>
+              <div style={cardValueStyle}>{item.rate}%</div>
+              <div style={cardTrendStyle}>
+                {item.converted} de {item.base} avancaram nesta etapa
+              </div>
+            </article>
+          ))}
+        </div>
+        <div style={conversionFootnoteStyle}>
+          Analise baseada no estagio atual das oportunidades. Para taxa por coorte, o CRM precisaria registrar o historico de passagem por
+          etapa com janela de tempo.
+        </div>
+      </section>
+
+      <section style={panelStyle}>
+        <div style={sectionHeaderStyle}>
+          <div>
             <div style={eyebrowStyle}>Detalhamento por etapa</div>
             <h2 style={titleStyle}>Peso financeiro do pipeline</h2>
           </div>
@@ -170,6 +223,42 @@ export function StatisticsScreen() {
             ))
           ) : (
             <div style={emptyStageStyle}>Ainda nao ha origem de leads cadastrada nas oportunidades abertas.</div>
+          )}
+        </div>
+      </section>
+
+      <section style={panelStyle}>
+        <div style={sectionHeaderStyle}>
+          <div>
+            <div style={eyebrowStyle}>Conversao por origem</div>
+            <h2 style={titleStyle}>Qualidade de cada canal</h2>
+          </div>
+        </div>
+        <div style={sourceConversionGridStyle}>
+          {stats.sourceConversions.length ? (
+            stats.sourceConversions.map((group) => (
+              <article key={group.source} style={sourceConversionCardStyle}>
+                <div style={stageHeaderStyle}>
+                  <div style={stageTitleStyle}>{group.source}</div>
+                  <div style={sourceConversionBadgeStyle}>{group.conversions[0]?.base ?? 0} lead(s)</div>
+                </div>
+                <div style={sourceConversionListStyle}>
+                  {group.conversions.map((item) => (
+                    <div key={item.label} style={sourceConversionRowStyle}>
+                      <div>
+                        <div style={cardLabelStyle}>{item.label}</div>
+                        <div style={sourceConversionMetaStyle}>
+                          {item.converted} de {item.base}
+                        </div>
+                      </div>
+                      <div style={sourceConversionRateStyle}>{item.rate}%</div>
+                    </div>
+                  ))}
+                </div>
+              </article>
+            ))
+          ) : (
+            <div style={emptyStageStyle}>Ainda nao ha base suficiente para cruzar conversao por origem.</div>
           )}
         </div>
       </section>
@@ -299,6 +388,20 @@ const sourceGridStyle: React.CSSProperties = {
   gap: 14
 };
 
+const conversionGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 14
+};
+
+const sourceConversionGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+  gap: 14
+};
+
 const cardStyle: React.CSSProperties = {
   padding: 18,
   borderRadius: 20,
@@ -373,6 +476,14 @@ const sourceCardStyle: React.CSSProperties = {
   ...stageCardStyle
 };
 
+const conversionCardStyle: React.CSSProperties = {
+  ...stageCardStyle
+};
+
+const sourceConversionCardStyle: React.CSSProperties = {
+  ...stageCardStyle
+};
+
 const stageHeaderStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
@@ -420,4 +531,50 @@ const emptyStageStyle: React.CSSProperties = {
   border: "1px dashed var(--line)",
   color: "var(--muted)",
   fontSize: 13
+};
+
+const conversionFootnoteStyle: React.CSSProperties = {
+  marginTop: 12,
+  color: "var(--muted)",
+  fontSize: 12,
+  lineHeight: 1.6
+};
+
+const sourceConversionBadgeStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 999,
+  background: "rgba(20, 184, 166, 0.12)",
+  color: "#0f766e",
+  fontSize: 12,
+  fontWeight: 800
+};
+
+const sourceConversionListStyle: React.CSSProperties = {
+  marginTop: 14,
+  display: "grid",
+  gap: 10
+};
+
+const sourceConversionRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  padding: "12px 14px",
+  borderRadius: 16,
+  background: "#ffffff",
+  border: "1px solid var(--line)"
+};
+
+const sourceConversionMetaStyle: React.CSSProperties = {
+  marginTop: 4,
+  color: "var(--muted)",
+  fontSize: 12
+};
+
+const sourceConversionRateStyle: React.CSSProperties = {
+  fontSize: "1.05rem",
+  fontWeight: 900,
+  letterSpacing: "-0.02em",
+  color: "var(--accent)"
 };
