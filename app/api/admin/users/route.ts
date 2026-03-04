@@ -9,6 +9,10 @@ type CreateUserBody = {
   role?: "admin" | "manager" | "sales";
 };
 
+type DeleteUserBody = {
+  userId?: string;
+};
+
 export async function POST(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -130,5 +134,119 @@ export async function POST(request: NextRequest) {
     ok: true,
     message: "Usuario criado e vinculado a organizacao atual.",
     userId: createdUser.user.id
+  });
+}
+
+export async function DELETE(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey || !supabaseServiceRoleKey) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message:
+          "Configure NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY para excluir usuarios internos."
+      },
+      { status: 500 }
+    );
+  }
+
+  const accessToken = request.cookies.get("crm_access_token")?.value;
+
+  if (!accessToken) {
+    return NextResponse.json({ ok: false, message: "Sessao invalida." }, { status: 401 });
+  }
+
+  const body = (await request.json()) as DeleteUserBody;
+  const userId = body.userId?.trim() ?? "";
+
+  if (!userId) {
+    return NextResponse.json({ ok: false, message: "Informe o usuario a ser excluido." }, { status: 400 });
+  }
+
+  const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+
+  const serviceClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  });
+
+  const {
+    data: { user: currentUser },
+    error: currentUserError
+  } = await authClient.auth.getUser(accessToken);
+
+  if (currentUserError || !currentUser) {
+    return NextResponse.json({ ok: false, message: "Sessao expirada. Entre novamente." }, { status: 401 });
+  }
+
+  if (currentUser.id === userId) {
+    return NextResponse.json(
+      { ok: false, message: "Nao e permitido excluir o proprio usuario administrador por esta rota." },
+      { status: 400 }
+    );
+  }
+
+  const { data: adminProfile, error: adminProfileError } = await serviceClient
+    .from("profiles")
+    .select("organization_id, role")
+    .eq("id", currentUser.id)
+    .maybeSingle();
+
+  if (adminProfileError || !adminProfile?.organization_id) {
+    return NextResponse.json(
+      { ok: false, message: "Nao foi possivel validar o perfil atual." },
+      { status: 403 }
+    );
+  }
+
+  if (adminProfile.role !== "admin") {
+    return NextResponse.json(
+      { ok: false, message: "Apenas administradores podem excluir usuarios da equipe." },
+      { status: 403 }
+    );
+  }
+
+  const { data: targetProfile, error: targetProfileError } = await serviceClient
+    .from("profiles")
+    .select("id, organization_id, role")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (targetProfileError || !targetProfile) {
+    return NextResponse.json({ ok: false, message: "Usuario nao encontrado." }, { status: 404 });
+  }
+
+  if (targetProfile.organization_id !== adminProfile.organization_id) {
+    return NextResponse.json(
+      { ok: false, message: "Nao e permitido excluir usuarios de outra organizacao." },
+      { status: 403 }
+    );
+  }
+
+  const { error: deleteUserError } = await serviceClient.auth.admin.deleteUser(userId);
+
+  if (deleteUserError) {
+    return NextResponse.json(
+      {
+        ok: false,
+        message: deleteUserError.message || "Nao foi possivel excluir o usuario."
+      },
+      { status: 400 }
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    message: "Usuario excluido com seus registros vinculados."
   });
 }

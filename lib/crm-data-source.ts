@@ -1809,29 +1809,6 @@ export async function deleteCustomer(input: { id: string; tradeName: string }): 
     return { ok: true, message: "Cliente removido." };
   }
 
-  const [contactsRes, opportunitiesRes, activitiesRes] = await Promise.all([
-    supabase.from("contacts").select("id", { count: "exact", head: true }).eq("account_id", input.id),
-    supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("account_id", input.id),
-    supabase.from("activities").select("id", { count: "exact", head: true }).eq("account_id", input.id)
-  ]);
-
-  const contactCount = contactsRes.count ?? 0;
-  const opportunityCount = opportunitiesRes.count ?? 0;
-  const activityCount = activitiesRes.count ?? 0;
-
-  if (contactCount > 0 || opportunityCount > 0 || activityCount > 0) {
-    const dependencyLabels = [
-      contactCount ? `${contactCount} contato(s)` : null,
-      opportunityCount ? `${opportunityCount} oportunidade(s)` : null,
-      activityCount ? `${activityCount} atividade(s)` : null
-    ].filter(Boolean);
-
-    return {
-      ok: false,
-      message: `Exclusao bloqueada. Este cliente ainda possui ${dependencyLabels.join(", ")} vinculadas.`
-    };
-  }
-
   const { error } = await supabase.from("accounts").delete().eq("id", input.id);
 
   if (error) {
