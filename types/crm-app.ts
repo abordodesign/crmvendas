@@ -24,6 +24,8 @@ export type TaskItem = {
   id: string;
   title: string;
   company: string;
+  opportunityId?: string;
+  opportunityTitle?: string;
   due: string;
   priority: string;
   dueDate?: string;

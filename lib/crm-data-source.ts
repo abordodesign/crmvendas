@@ -1746,7 +1746,7 @@ export async function getTasks(): Promise<TaskItem[]> {
       const { data, error } = await supabase
         .from("tasks")
         .select(
-          "id, title, due_at, priority, opportunities:opportunity_id(accounts:account_id(trade_name, legal_name), title)"
+          "id, title, due_at, priority, opportunities:opportunity_id(id, title, accounts:account_id(trade_name, legal_name))"
         )
         .order("due_at", { ascending: true });
 
@@ -1762,6 +1762,8 @@ export async function getTasks(): Promise<TaskItem[]> {
           id: task.id,
           title: task.title,
           company: account?.trade_name ?? account?.legal_name ?? opportunity?.title ?? "Sem conta",
+          opportunityId: opportunity?.id ?? undefined,
+          opportunityTitle: opportunity?.title ?? undefined,
           due: formatDateTime(task.due_at),
           priority: task.priority ?? "Media",
           dueDate: toDateInput(task.due_at),
@@ -3407,6 +3409,7 @@ export async function getNotificationCenterItems(): Promise<StoredNotification[]
 export async function createTask(input: {
   title: string;
   opportunityId?: string;
+  opportunityTitle?: string;
   dueDate?: string;
   dueTime?: string;
   priority: string;
@@ -3419,6 +3422,8 @@ export async function createTask(input: {
     id: `local-task-${Date.now()}`,
     title: input.title,
     company: input.companyLabel ?? "Sem conta",
+    opportunityId: input.opportunityId,
+    opportunityTitle: input.opportunityTitle,
     due: formatDateTime(dueAt),
     priority: input.priority,
     dueDate: input.dueDate,
@@ -3459,6 +3464,8 @@ export async function createTask(input: {
     id: data.id,
     title: data.title,
     company: input.companyLabel ?? "Sem conta",
+    opportunityId: input.opportunityId,
+    opportunityTitle: input.opportunityTitle,
     due: formatDateTime(data.due_at),
     priority: data.priority ?? input.priority,
     dueDate: toDateInput(data.due_at),
@@ -3483,6 +3490,8 @@ export async function createTask(input: {
 export async function updateTask(input: {
   id: string;
   title: string;
+  opportunityId?: string;
+  opportunityTitle?: string;
   dueDate?: string;
   dueTime?: string;
   priority: string;
@@ -3493,6 +3502,8 @@ export async function updateTask(input: {
     id: input.id,
     title: input.title,
     company: input.companyLabel ?? "Sem conta",
+    opportunityId: input.opportunityId,
+    opportunityTitle: input.opportunityTitle,
     due: formatDateTime(dueAt),
     priority: input.priority,
     dueDate: input.dueDate,
@@ -3516,6 +3527,7 @@ export async function updateTask(input: {
     .from("tasks")
     .update({
       title: input.title,
+      opportunity_id: input.opportunityId || null,
       priority: input.priority,
       due_at: dueAt || null
     })
@@ -3535,6 +3547,8 @@ export async function updateTask(input: {
     id: data.id,
     title: data.title,
     company: input.companyLabel ?? "Sem conta",
+    opportunityId: input.opportunityId,
+    opportunityTitle: input.opportunityTitle,
     due: formatDateTime(data.due_at),
     priority: data.priority ?? input.priority,
     dueDate: toDateInput(data.due_at),

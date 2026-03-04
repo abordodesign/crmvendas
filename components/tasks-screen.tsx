@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { CrmShell, pillStyle } from "@/components/crm-shell";
 import { hasPermission } from "@/lib/access-control";
-import { completeTask, createTask, deleteTask, getTasks, updateTask } from "@/lib/crm-data-source";
+import { completeTask, createTask, deleteTask, getOpportunityReferenceOptions, getTasks, updateTask } from "@/lib/crm-data-source";
 import { seedTasks } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
 import type { TaskItem } from "@/types/crm-app";
@@ -17,9 +17,11 @@ const PRIORITY_OPTIONS = [
 export function TasksScreen() {
   const role = useCrmRole();
   const [tasks, setTasks] = useState<TaskItem[]>(seedTasks);
+  const [opportunityOptions, setOpportunityOptions] = useState<Array<{ id: string; title: string; company: string }>>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isViewMode, setIsViewMode] = useState(false);
   const [title, setTitle] = useState("");
+  const [opportunityId, setOpportunityId] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [dueTime, setDueTime] = useState("");
   const [priority, setPriority] = useState(PRIORITY_OPTIONS[1].id);
@@ -35,10 +37,11 @@ export function TasksScreen() {
     let isMounted = true;
 
     async function load() {
-      const nextTasks = await getTasks();
+      const [nextTasks, nextOpportunities] = await Promise.all([getTasks(), getOpportunityReferenceOptions()]);
 
       if (isMounted) {
         setTasks(nextTasks);
+        setOpportunityOptions(nextOpportunities);
       }
     }
 
@@ -52,6 +55,7 @@ export function TasksScreen() {
   function resetForm() {
     setEditingId(null);
     setTitle("");
+    setOpportunityId("");
     setDueDate("");
     setDueTime("");
     setPriority(PRIORITY_OPTIONS[1].id);
@@ -67,6 +71,7 @@ export function TasksScreen() {
   function populateTask(task: TaskItem) {
     setEditingId(task.id);
     setTitle(task.title);
+    setOpportunityId(task.opportunityId ?? "");
     setDueDate(task.dueDate ?? "");
     setDueTime(task.dueTime ?? "");
     setPriority(task.priority);
@@ -112,10 +117,14 @@ export function TasksScreen() {
           const result = await updateTask({
             id: editingId,
             title,
+            opportunityId,
+            opportunityTitle: opportunityOptions.find((item) => item.id === opportunityId)?.title,
             dueDate,
             dueTime,
             priority,
-            companyLabel: currentRecord.company
+            companyLabel:
+              opportunityOptions.find((item) => item.id === opportunityId)?.company ??
+              (opportunityId ? currentRecord.company : "Sem conta")
           });
 
           if (!result.ok) {
@@ -152,9 +161,12 @@ export function TasksScreen() {
       void (async () => {
         const created = await createTask({
           title,
+          opportunityId,
+          opportunityTitle: opportunityOptions.find((item) => item.id === opportunityId)?.title,
           dueDate,
           dueTime,
-          priority
+          priority,
+          companyLabel: opportunityOptions.find((item) => item.id === opportunityId)?.company
         });
 
         setTasks((current) => [created, ...current]);
@@ -233,6 +245,9 @@ export function TasksScreen() {
         viewMode={isViewMode}
         title={title}
         onTitleChange={setTitle}
+        opportunityId={opportunityId}
+        onOpportunityChange={setOpportunityId}
+        opportunityOptions={opportunityOptions}
         dueDate={dueDate}
         onDueDateChange={setDueDate}
         dueTime={dueTime}
@@ -417,6 +432,7 @@ export function TasksScreen() {
                 }}
               >
                 <DataCell label="Execucao" value={task.due} />
+                <DataCell label="Oportunidade" value={task.opportunityTitle || "Nao vinculada"} />
                 <DataCell label="Prioridade" value={task.priority} emphasis color={priorityColor(task.priority)} />
               </div>
             </article>
@@ -568,6 +584,9 @@ function TaskFormModal({
   viewMode,
   title,
   onTitleChange,
+  opportunityId,
+  onOpportunityChange,
+  opportunityOptions,
   dueDate,
   onDueDateChange,
   dueTime,
@@ -585,6 +604,9 @@ function TaskFormModal({
   viewMode: boolean;
   title: string;
   onTitleChange: (value: string) => void;
+  opportunityId: string;
+  onOpportunityChange: (value: string) => void;
+  opportunityOptions: Array<{ id: string; title: string; company: string }>;
   dueDate: string;
   onDueDateChange: (value: string) => void;
   dueTime: string;
@@ -649,6 +671,19 @@ function TaskFormModal({
                 required
                 disabled={viewMode}
               />
+              <SelectField
+                label="Oportunidade"
+                value={opportunityId}
+                onChange={onOpportunityChange}
+                options={[
+                  { id: "", label: "Nao vinculada" },
+                  ...opportunityOptions.map((item) => ({
+                    id: item.id,
+                    label: `${item.title} - ${item.company}`
+                  }))
+                ]}
+                disabled={viewMode}
+              />
               <DateField label="Data" value={dueDate} onChange={onDueDateChange} disabled={viewMode} />
               <TimeField label="Hora" value={dueTime} onChange={onDueTimeChange} disabled={viewMode} />
               <SelectField
@@ -666,6 +701,13 @@ function TaskFormModal({
               <div style={sectionTitleStyle}>Resumo da tarefa</div>
               <div style={summaryBoxStyle}>
                 <ModalStat label="Titulo" value={title || "Nao informado"} />
+                <ModalStat
+                  label="Oportunidade"
+                  value={
+                    opportunityOptions.find((item) => item.id === opportunityId)?.title ??
+                    (opportunityId ? "Oportunidade vinculada" : "Nao vinculada")
+                  }
+                />
                 <ModalStat label="Prioridade" value={priorityLabel || "Nao informada"} />
                 <ModalStat label="Execucao" value={[dueDate, dueTime].filter(Boolean).join(" ") || "Sem agenda"} />
               </div>
