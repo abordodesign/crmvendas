@@ -1682,12 +1682,12 @@ function OpportunityFormModal({
           {editing && viewMode ? (
             <>
               {!isConclusionMode && !showConclusionFields ? (
-                <button type="button" onClick={onStartConclusion} disabled={isPending || !canConclude} style={submitButtonStyle}>
+                <button type="button" onClick={onStartConclusion} disabled={isPending || !canConclude} style={conclusionButtonStyle}>
                   Concluir
                 </button>
               ) : null}
               {isConclusionMode ? (
-                <button type="button" onClick={onConclude} disabled={isPending || !canConclude} style={submitButtonStyle}>
+                <button type="button" onClick={onConclude} disabled={isPending || !canConclude} style={conclusionButtonStyle}>
                   {isPending ? "Concluindo..." : "Salvar conclusao"}
                 </button>
               ) : null}
@@ -1943,6 +1943,11 @@ const submitButtonStyle: React.CSSProperties = {
   color: "#ffffff",
   fontWeight: 800,
   cursor: "pointer"
+};
+
+const conclusionButtonStyle: React.CSSProperties = {
+  ...submitButtonStyle,
+  background: "linear-gradient(135deg, #059669 0%, #047857 100%)"
 };
 
 const secondaryButtonStyle: React.CSSProperties = {

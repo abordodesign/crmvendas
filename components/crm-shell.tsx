@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CrmAuthProvider } from "@/components/crm-auth-context";
 import { CrmSettingsProvider } from "@/components/crm-settings-context";
@@ -92,6 +93,7 @@ export function CrmShell({
   primaryAction = "Nova oportunidade",
   children
 }: CrmShellProps) {
+  const router = useRouter();
   const [authState, setAuthState] = useState<{
     role: AppRole | null;
     fullName: string;
@@ -105,6 +107,14 @@ export function CrmShell({
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notificationModuleFilter, setNotificationModuleFilter] = useState<(typeof notificationModuleOptions)[number]["id"]>("all");
   const [settings, setSettings] = useState(defaultCrmSettings);
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    await fetch("/api/auth/session", {
+      method: "DELETE"
+    });
+    router.push("/login");
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -410,19 +420,23 @@ export function CrmShell({
               </div>
             </div>
 
-            <Link
-              href="/"
+            <button
+              type="button"
+              onClick={() => {
+                void handleLogout();
+              }}
               style={{
                 padding: "14px 16px",
                 borderRadius: 18,
                 background: "#ffffff",
                 border: "1px solid var(--line)",
                 fontWeight: 700,
-                textAlign: "center"
+                textAlign: "center",
+                cursor: "pointer"
               }}
             >
-              Voltar para a landing
-            </Link>
+              Sair do sistema
+            </button>
           </aside>
 
           <section style={{ display: "grid", gap: 18 }}>
