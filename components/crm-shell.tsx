@@ -20,6 +20,7 @@ import type { NotificationItem } from "@/types/crm-app";
 type CrmShellProps = {
   activePath:
     | "/dashboard"
+    | "/dashboard/statistics"
     | "/dashboard/agenda"
     | "/dashboard/customers"
     | "/dashboard/opportunities"
@@ -35,6 +36,7 @@ type CrmShellProps = {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard/statistics", label: "Estatisticas" },
   { href: "/dashboard/agenda", label: "Agenda" },
   { href: "/dashboard/customers", label: "Clientes" },
   { href: "/dashboard/opportunities", label: "Oportunidades" },

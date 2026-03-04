@@ -60,7 +60,7 @@ export const pipelineColumns: PipelineColumn[] = [
   },
   {
     id: "proposal",
-    name: "Proposta",
+    name: "Proposta enviada",
     opportunities: [
       {
         id: "opp-3",

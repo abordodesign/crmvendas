@@ -21,12 +21,12 @@ as $$
 begin
   insert into public.pipeline_stages (organization_id, name, stage_order, probability)
   values
-    (p_organization_id, 'Prospect', 1, 10),
-    (p_organization_id, 'Qualificado', 2, 25),
-    (p_organization_id, 'Apresentacao', 3, 45),
-    (p_organization_id, 'Proposta', 4, 60),
+    (p_organization_id, 'Lead', 1, 10),
+    (p_organization_id, 'Qualificacao', 2, 25),
+    (p_organization_id, 'Diagnostico', 3, 45),
+    (p_organization_id, 'Proposta enviada', 4, 70),
     (p_organization_id, 'Negociacao', 5, 80),
-    (p_organization_id, 'Conclusao', 6, 100)
+    (p_organization_id, 'Fechamento', 6, 100)
   on conflict (organization_id, stage_order) do nothing;
 end
 $$;

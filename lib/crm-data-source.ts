@@ -18,6 +18,7 @@ import type {
   NotificationItem,
   NotificationPriority,
   OpportunityItem,
+  PipelineStatistics,
   PipelineColumn,
   TaskItem
 } from "@/types/crm-app";
@@ -26,7 +27,15 @@ type ReferenceOption = {
   id: string;
   label: string;
   searchText?: string;
+  probability?: number;
 };
+
+export const LEAD_SOURCE_OPTIONS: ReferenceOption[] = [
+  { id: "instagram", label: "Instagram" },
+  { id: "indicacao", label: "Indicacao" },
+  { id: "google", label: "Google" },
+  { id: "site", label: "Site" }
+];
 
 type StoredNotification = NotificationItem & {
   resolvedAt?: string | null;
@@ -79,13 +88,27 @@ const queryCache = new Map<
 >();
 
 export const DEFAULT_STAGE_OPTIONS: ReferenceOption[] = [
-  { id: "prospect", label: "Prospect" },
-  { id: "qualified", label: "Qualificado" },
-  { id: "presentation", label: "Apresentacao" },
-  { id: "proposal", label: "Proposta" },
-  { id: "negotiation", label: "Negociacao" },
-  { id: "conclusion", label: "Conclusao" }
+  { id: "lead", label: "Lead", probability: 10 },
+  { id: "qualification", label: "Qualificacao", probability: 25 },
+  { id: "discovery", label: "Diagnostico", probability: 45 },
+  { id: "proposal-sent", label: "Proposta enviada", probability: 70 },
+  { id: "negotiation", label: "Negociacao", probability: 80 },
+  { id: "closing", label: "Fechamento", probability: 100 }
 ];
+
+const DEFAULT_STAGE_PROBABILITIES: Record<string, number> = {
+  Lead: 10,
+  Prospect: 10,
+  Qualificacao: 25,
+  Qualificado: 25,
+  Diagnostico: 45,
+  Apresentacao: 45,
+  "Proposta enviada": 70,
+  Proposta: 70,
+  Negociacao: 80,
+  Fechamento: 100,
+  Conclusao: 100
+};
 
 export const CONCLUSION_STATUS_OPTIONS: ReferenceOption[] = [
   { id: "ativo", label: "Ativo" },
@@ -101,8 +124,39 @@ export const CONCLUSION_REASON_OPTIONS: ReferenceOption[] = [
   { id: "projeto-futuro", label: "Projeto Futuro" }
 ];
 
+function normalizeStageLabel(value: string | null | undefined) {
+  const normalized = (value ?? "").trim().toLowerCase();
+
+  if (!normalized) {
+    return "Sem etapa";
+  }
+
+  if (normalized === "prospect") {
+    return "Lead";
+  }
+
+  if (normalized === "qualificado") {
+    return "Qualificacao";
+  }
+
+  if (normalized === "apresentacao") {
+    return "Diagnostico";
+  }
+
+  if (normalized === "proposta") {
+    return "Proposta enviada";
+  }
+
+  if (normalized === "conclusao") {
+    return "Fechamento";
+  }
+
+  return value ?? "Sem etapa";
+}
+
 export function isConclusionStage(stage: string | null | undefined) {
-  return (stage ?? "").trim().toLowerCase() === "conclusao";
+  const normalized = (stage ?? "").trim().toLowerCase();
+  return normalized === "conclusao" || normalized === "fechamento";
 }
 
 function pickOne<T>(value: T | T[] | null | undefined): T | null {
@@ -126,7 +180,28 @@ function getLocalOpportunityPreviews(): OpportunityItem[] {
 
   try {
     const parsed = JSON.parse(raw) as OpportunityItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.map((item) => {
+      const normalizedStage = normalizeStageLabel(item.stage);
+      const hasManualProbability = typeof item.manualProbability === "number" && Number.isFinite(item.manualProbability);
+      const effectiveProbability =
+        typeof item.probability === "number" && Number.isFinite(item.probability)
+          ? item.probability
+          : hasManualProbability
+            ? item.manualProbability ?? 0
+            : DEFAULT_STAGE_PROBABILITIES[normalizedStage] ?? 0;
+
+      return {
+        ...item,
+        leadSource: typeof item.leadSource === "string" ? item.leadSource : undefined,
+        stage: normalizedStage,
+        probability: Math.max(0, Math.min(100, effectiveProbability)),
+        manualProbability: hasManualProbability ? item.manualProbability : undefined
+      };
+    });
   } catch {
     return [];
   }
@@ -526,6 +601,140 @@ function currency(value: number | null | undefined) {
   }).format(value);
 }
 
+type PipelineStatsSourceOpportunity = {
+  id: string;
+  stage: string;
+  probability: number;
+  amount: number;
+  leadSource?: string;
+  expectedCloseDate: string | null;
+  status: string;
+};
+
+function normalizePipelineStatsOpportunity(input: {
+  id: string;
+  stage: string;
+  probability?: number | null;
+  amount: number;
+  leadSource?: string;
+  expectedCloseDate: string | null;
+  status: string;
+}): PipelineStatsSourceOpportunity {
+  return {
+    id: input.id,
+    stage: input.stage,
+    probability: Math.max(0, Math.min(100, input.probability ?? DEFAULT_STAGE_PROBABILITIES[input.stage] ?? 0)),
+    amount: Math.max(0, input.amount),
+    leadSource: input.leadSource?.trim() || undefined,
+    expectedCloseDate: input.expectedCloseDate,
+    status: input.status
+  };
+}
+
+function isOpenPipelineOpportunity(item: PipelineStatsSourceOpportunity) {
+  return mapUiOpportunityStatusToDb(item.status) === "open" && !isConclusionStage(item.stage);
+}
+
+function isSameMonth(date: Date, reference: Date) {
+  return date.getFullYear() === reference.getFullYear() && date.getMonth() === reference.getMonth();
+}
+
+function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): PipelineStatistics {
+  const openItems = items.filter(isOpenPipelineOpportunity);
+  const now = new Date();
+  const totalPipeline = openItems.reduce((sum, item) => sum + item.amount, 0);
+  const weightedPipeline = openItems.reduce((sum, item) => sum + item.amount * (item.probability / 100), 0);
+  const averageProbability = totalPipeline > 0 ? Math.round((weightedPipeline / totalPipeline) * 100) : 0;
+  const dueThisMonth = openItems.filter((item) => {
+    const parsed = item.expectedCloseDate ? new Date(item.expectedCloseDate) : null;
+
+    return parsed ? isSameMonth(parsed, now) : false;
+  });
+  const forecastMonth = dueThisMonth.reduce((sum, item) => sum + item.amount * (item.probability / 100), 0);
+  const nearestClose = openItems
+    .map((item) => {
+      const parsed = item.expectedCloseDate ? new Date(item.expectedCloseDate) : null;
+
+      if (!parsed || Number.isNaN(parsed.getTime())) {
+        return null;
+      }
+
+      return {
+        raw: item.expectedCloseDate,
+        time: parsed.getTime()
+      };
+    })
+    .filter((item): item is { raw: string; time: number } => Boolean(item))
+    .sort((left, right) => left.time - right.time)[0];
+  const grouped = new Map<string, PipelineStatistics["byStage"][number]>();
+  const leadSources = new Map<string, { source: string; count: number; total: number }>();
+
+  openItems.forEach((item) => {
+    const current = grouped.get(item.stage) ?? {
+      stage: item.stage,
+      probability: item.probability,
+      count: 0,
+      total: 0,
+      weightedTotal: 0
+    };
+
+    current.count += 1;
+    current.total += item.amount;
+    current.weightedTotal += item.amount * (item.probability / 100);
+    grouped.set(item.stage, current);
+
+    const sourceKey = item.leadSource?.trim() || "Sem origem";
+    const currentSource = leadSources.get(sourceKey) ?? {
+      source: sourceKey,
+      count: 0,
+      total: 0
+    };
+
+    currentSource.count += 1;
+    currentSource.total += item.amount;
+    leadSources.set(sourceKey, currentSource);
+  });
+
+  return {
+    totalPipeline,
+    weightedPipeline,
+    averageProbability,
+    forecastMonth,
+    openOpportunities: openItems.length,
+    dueThisMonth: dueThisMonth.length,
+    nearestCloseDate: nearestClose?.raw ?? null,
+    byStage: Array.from(grouped.values()).sort((left, right) => right.total - left.total),
+    leadSources: Array.from(leadSources.values())
+      .sort((left, right) => right.count - left.count || right.total - left.total)
+      .map((item) => ({
+        ...item,
+        percentage: openItems.length ? Math.round((item.count / openItems.length) * 100) : 0
+      }))
+  };
+}
+
+export async function getPipelineStatistics(): Promise<PipelineStatistics> {
+  return getCachedQuery("pipeline:statistics", async () => {
+    const opportunities = await getOpportunities();
+
+    const items = opportunities.map((item) =>
+      normalizePipelineStatsOpportunity({
+        id: item.id,
+        stage: normalizeStageLabel(item.stage),
+        probability: item.manualProbability ?? item.probability,
+        amount: amountLabelToNumber(item.amount),
+        leadSource: item.leadSource,
+        expectedCloseDate: (() => {
+          const parsed = parseDisplayDate(item.expectedCloseDate);
+          return parsed ? parsed.toISOString() : null;
+        })(),
+        status: item.status
+      })
+    );
+    return computePipelineStatistics(items);
+  });
+}
+
 function mapDbOpportunityStatusToUi(value: string | null | undefined) {
   if (!value) {
     return "Em andamento";
@@ -869,7 +1078,7 @@ function buildNotificationRules(input: {
     const next = (item.nextStep ?? "").toLowerCase();
     const hasPlaceholderStep = !next || next.includes("definir") || next.includes("atualizar");
 
-    if (hasPlaceholderStep && ["Negociacao", "Proposta", "Conclusao"].includes(item.stage)) {
+    if (hasPlaceholderStep && ["Negociacao", "Proposta enviada", "Proposta", "Fechamento", "Conclusao"].includes(item.stage)) {
       rules.push({
         ruleKey: `opportunity-next-step-${item.id}`,
         type: "opportunity_next_step",
@@ -891,7 +1100,7 @@ function buildNotificationRules(input: {
 
     const diffDays = Math.ceil((closingDate.getTime() - now) / 86400000);
 
-    if (diffDays >= 0 && diffDays <= 3 && item.stage !== "Conclusao") {
+    if (diffDays >= 0 && diffDays <= 3 && !isConclusionStage(item.stage)) {
       rules.push({
         ruleKey: `opportunity-close-${item.id}`,
         type: "opportunity_closing_soon",
@@ -1094,7 +1303,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
     opportunitiesRes.data?.forEach((opportunity) => {
       const stageId = opportunity.stage_id ?? "sem-etapa";
-      const stageName = stageNames.get(stageId) ?? "Sem etapa";
+      const stageName = normalizeStageLabel(stageNames.get(stageId) ?? "Sem etapa");
       const account = pickOne(opportunity.accounts);
       const owner = pickOne(opportunity.profiles);
 
@@ -1203,7 +1412,7 @@ export async function getDashboardData(): Promise<DashboardData> {
 
     const fetchedOpportunities =
       opportunitiesRes.data?.map((opportunity) => {
-        const stage = stageNames.get(opportunity.stage_id ?? "") ?? "Sem etapa";
+        const stage = normalizeStageLabel(stageNames.get(opportunity.stage_id ?? "") ?? "Sem etapa");
         const account = pickOne(opportunity.accounts);
         const owner = pickOne(opportunity.profiles);
 
@@ -1211,6 +1420,7 @@ export async function getDashboardData(): Promise<DashboardData> {
           id: opportunity.id,
           title: opportunity.title,
           company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
+          leadSource: undefined,
           stage,
           owner: owner?.full_name ?? "Sem responsavel",
           nextStep: "Atualizar proximo passo",
@@ -1218,8 +1428,10 @@ export async function getDashboardData(): Promise<DashboardData> {
           isRecurring: Boolean(opportunity.is_recurring),
           months: opportunity.months ?? 1,
           amount: currency(opportunity.amount),
+          probability: Math.max(0, Math.min(100, DEFAULT_STAGE_PROBABILITIES[stage] ?? 0)),
+          manualProbability: undefined,
           expectedCloseDate: formatDate(opportunity.expected_close_date),
-          status: opportunity.status ?? "Em andamento"
+          status: mapDbOpportunityStatusToUi(opportunity.status)
         };
       }) ?? [];
 
@@ -1324,12 +1536,26 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
     const currentContext = await getCurrentUserContext();
 
     try {
-      const { data, error } = await supabase
+      const primaryQuery = await supabase
         .from("opportunities")
         .select(
-          "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+          "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
         .order("created_at", { ascending: false });
+      let data = (primaryQuery.data ?? null) as Array<Record<string, any>> | null;
+      let error = primaryQuery.error;
+
+      if (error || !data) {
+        const fallbackQuery = await supabase
+          .from("opportunities")
+          .select(
+            "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+          )
+          .order("created_at", { ascending: false });
+
+        data = (fallbackQuery.data ?? null) as Array<Record<string, any>> | null;
+        error = fallbackQuery.error;
+      }
 
       if (error || !data) {
         return localPreviews.length ? mergeOpportunities(localPreviews, seedOpportunities) : seedOpportunities;
@@ -1339,18 +1565,32 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
         const stage = pickOne(opportunity.pipeline_stages);
         const account = pickOne(opportunity.accounts);
         const owner = pickOne(opportunity.profiles);
+        const probabilityOverride =
+          typeof opportunity === "object" && opportunity && "probability_override" in opportunity
+            ? (opportunity as { probability_override?: number | null }).probability_override
+            : null;
+        const leadSource =
+          typeof opportunity === "object" && opportunity && "lead_source" in opportunity
+            ? (opportunity as { lead_source?: string | null }).lead_source
+            : null;
 
         return {
           id: opportunity.id,
           title: opportunity.title,
           company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
-          stage: stage?.name ?? "Sem etapa",
+          leadSource: leadSource ?? undefined,
+          stage: normalizeStageLabel(stage?.name),
           owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
           nextStep: opportunity.next_step ?? "Atualizar proximo passo",
           baseAmount: currency(opportunity.base_amount),
           isRecurring: Boolean(opportunity.is_recurring),
           months: opportunity.months ?? 1,
           amount: currency(opportunity.amount),
+          probability: Math.max(
+            0,
+            Math.min(100, probabilityOverride ?? stage?.probability ?? DEFAULT_STAGE_PROBABILITIES[normalizeStageLabel(stage?.name)] ?? 0)
+          ),
+          manualProbability: probabilityOverride ?? undefined,
           expectedCloseDate: formatDate(opportunity.expected_close_date),
           status: mapDbOpportunityStatusToUi(opportunity.status),
           conclusionStatus: opportunity.conclusion_status ?? undefined,
@@ -1536,7 +1776,7 @@ export async function getReferenceOptions(): Promise<{
           .select("id, trade_name, legal_name")
           .order("created_at", { ascending: false })
           .limit(REFERENCE_ITEMS_LIMIT),
-        supabase.from("pipeline_stages").select("id, name, stage_order").order("stage_order", { ascending: true })
+        supabase.from("pipeline_stages").select("id, name, stage_order, probability").order("stage_order", { ascending: true })
       ]);
 
       const remoteAccounts =
@@ -1558,9 +1798,10 @@ export async function getReferenceOptions(): Promise<{
         accounts: mergedAccounts,
         stages:
           stagesRes.data?.length
-            ? stagesRes.data.map((item) => ({
+              ? stagesRes.data.map((item) => ({
                 id: item.id,
-                label: item.name
+                label: normalizeStageLabel(item.name),
+                probability: item.probability
               }))
             : DEFAULT_STAGE_OPTIONS
       };
@@ -1880,11 +2121,13 @@ export async function createOpportunity(input: {
   title: string;
   accountId: string;
   stageId: string;
+  leadSource?: string;
   nextStep?: string;
   amount: number;
   baseAmount: number;
   isRecurring: boolean;
   months: number;
+  probability?: number;
   expectedCloseDate: string;
   status?: string;
   conclusionStatus?: string;
@@ -1899,6 +2142,7 @@ export async function createOpportunity(input: {
     id: `local-opportunity-${Date.now()}`,
     title: input.title,
     company: input.accountLabel ?? "Conta selecionada",
+    leadSource: input.leadSource,
     stage: input.stageLabel ?? "Etapa selecionada",
     owner: context?.fullName ?? "Equipe",
     nextStep: input.nextStep,
@@ -1906,6 +2150,8 @@ export async function createOpportunity(input: {
     isRecurring: input.isRecurring,
     months: input.months,
     amount: currency(input.amount),
+    probability: Math.max(0, Math.min(100, input.probability ?? DEFAULT_STAGE_PROBABILITIES[normalizeStageLabel(input.stageLabel)] ?? 0)),
+    manualProbability: input.probability,
     expectedCloseDate: formatDate(input.expectedCloseDate),
     status: input.status ?? "Em andamento",
     conclusionStatus: input.conclusionStatus,
@@ -1936,18 +2182,20 @@ export async function createOpportunity(input: {
       owner_id: context.userId,
       title: input.title,
       status: mapUiOpportunityStatusToDb(input.status),
+      lead_source: input.leadSource || null,
       next_step: input.nextStep || null,
       base_amount: input.baseAmount,
       is_recurring: input.isRecurring,
       months: input.months,
       amount: input.amount,
+      probability_override: input.probability ?? null,
       expected_close_date: input.expectedCloseDate || null,
       conclusion_status: input.conclusionStatus || null,
       conclusion_reason: input.conclusionReason || null,
       concluded_at: input.concludedAt || null
     })
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -1963,13 +2211,19 @@ export async function createOpportunity(input: {
     id: data.id,
     title: data.title,
     company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
-    stage: stage?.name ?? "Sem etapa",
+    leadSource: data.lead_source ?? undefined,
+    stage: normalizeStageLabel(stage?.name),
     owner: context.fullName,
     nextStep: data.next_step ?? undefined,
     baseAmount: currency(data.base_amount),
     isRecurring: Boolean(data.is_recurring),
     months: data.months ?? input.months,
     amount: currency(data.amount),
+    probability: Math.max(
+      0,
+      Math.min(100, data.probability_override ?? stage?.probability ?? DEFAULT_STAGE_PROBABILITIES[normalizeStageLabel(stage?.name)] ?? 0)
+    ),
+    manualProbability: data.probability_override ?? undefined,
     expectedCloseDate: formatDate(data.expected_close_date),
     status: mapDbOpportunityStatusToUi(data.status),
     conclusionStatus: data.conclusion_status ?? undefined,
@@ -1996,11 +2250,13 @@ export async function updateOpportunity(input: {
   title: string;
   stageId?: string;
   stageLabel?: string;
+  leadSource?: string;
   nextStep?: string;
   amount: number;
   baseAmount: number;
   isRecurring: boolean;
   months: number;
+  probability?: number;
   expectedCloseDate: string;
   status?: string;
   conclusionStatus?: string;
@@ -2015,6 +2271,7 @@ export async function updateOpportunity(input: {
     id: input.id,
     title: input.title,
     company: input.currentCompany,
+    leadSource: input.leadSource,
     stage: input.stageLabel ?? input.currentStage,
     owner: context?.fullName ?? "Equipe",
     nextStep: input.nextStep,
@@ -2022,6 +2279,11 @@ export async function updateOpportunity(input: {
     isRecurring: input.isRecurring,
     months: input.months,
     amount: currency(input.amount),
+    probability: Math.max(
+      0,
+      Math.min(100, input.probability ?? DEFAULT_STAGE_PROBABILITIES[normalizeStageLabel(input.stageLabel ?? input.currentStage)] ?? 0)
+    ),
+    manualProbability: input.probability,
     expectedCloseDate: formatDate(input.expectedCloseDate),
     status: input.status ?? "Em andamento",
     conclusionStatus: input.conclusionStatus,
@@ -2049,11 +2311,13 @@ export async function updateOpportunity(input: {
       title: input.title,
       stage_id: input.stageId || undefined,
       status: mapUiOpportunityStatusToDb(input.status),
+      lead_source: input.leadSource || null,
       next_step: input.nextStep || null,
       base_amount: input.baseAmount,
       is_recurring: input.isRecurring,
       months: input.months,
       amount: input.amount,
+      probability_override: input.probability ?? null,
       expected_close_date: input.expectedCloseDate || null,
       conclusion_status: input.conclusionStatus || null,
       conclusion_reason: input.conclusionReason || null,
@@ -2061,7 +2325,7 @@ export async function updateOpportunity(input: {
     })
     .eq("id", input.id)
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -2077,13 +2341,25 @@ export async function updateOpportunity(input: {
     id: data.id,
     title: data.title,
     company: account?.trade_name ?? account?.legal_name ?? input.currentCompany,
-    stage: input.stageLabel ?? stage?.name ?? input.currentStage,
+    leadSource: data.lead_source ?? undefined,
+    stage: normalizeStageLabel(input.stageLabel ?? stage?.name ?? input.currentStage),
     owner: context.fullName,
     nextStep: data.next_step ?? undefined,
     baseAmount: currency(data.base_amount),
     isRecurring: Boolean(data.is_recurring),
     months: data.months ?? input.months,
     amount: currency(data.amount),
+    probability: Math.max(
+      0,
+      Math.min(
+        100,
+        data.probability_override ??
+          stage?.probability ??
+          DEFAULT_STAGE_PROBABILITIES[normalizeStageLabel(input.stageLabel ?? stage?.name ?? input.currentStage)] ??
+          0
+      )
+    ),
+    manualProbability: data.probability_override ?? undefined,
     expectedCloseDate: formatDate(data.expected_close_date),
     status: mapDbOpportunityStatusToUi(data.status),
     conclusionStatus: data.conclusion_status ?? undefined,
@@ -2173,7 +2449,11 @@ export async function moveOpportunityToStage(input: {
 
   const nextItem: OpportunityItem = {
     ...currentItem,
-    stage: input.targetStage,
+    stage: normalizeStageLabel(input.targetStage),
+    probability:
+      typeof currentItem.manualProbability === "number"
+        ? currentItem.manualProbability
+        : DEFAULT_STAGE_PROBABILITIES[normalizeStageLabel(input.targetStage)] ?? currentItem.probability,
     concludedAt:
       isConclusionStage(input.targetStage) && !currentItem.concludedAt
         ? new Date().toISOString()
@@ -2216,11 +2496,11 @@ export async function moveOpportunityToStage(input: {
     return nextItem;
   }
 
-  const { data: stageRow } = await supabase
+  const { data: stageRows } = await supabase
     .from("pipeline_stages")
-    .select("id")
-    .eq("name", input.targetStage)
-    .maybeSingle();
+    .select("id, name");
+
+  const stageRow = stageRows?.find((item) => normalizeStageLabel(item.name) === normalizeStageLabel(input.targetStage));
 
   if (!stageRow?.id) {
     await recordCrmActivity({

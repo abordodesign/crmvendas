@@ -9,10 +9,12 @@ import {
   CONCLUSION_REASON_OPTIONS,
   CONCLUSION_STATUS_OPTIONS,
   DEFAULT_STAGE_OPTIONS,
+  LEAD_SOURCE_OPTIONS,
   createCustomer,
   deleteOpportunity,
   createOpportunity,
   getOpportunities,
+  getPipelineStatistics,
   getReferenceOptions,
   isConclusionStage,
   moveOpportunityToStage,
@@ -24,7 +26,7 @@ import { useCrmRole } from "@/lib/use-crm-role";
 import type { OpportunityItem } from "@/types/crm-app";
 
 const NEW_ACCOUNT_OPTION = "__new__";
-const STAGE_FLOW = ["Prospect", "Qualificado", "Apresentacao", "Proposta", "Negociacao", "Conclusao"];
+const STAGE_FLOW = ["Lead", "Qualificacao", "Diagnostico", "Proposta enviada", "Negociacao", "Fechamento"];
 
 function upsertOpportunity(items: OpportunityItem[], nextItem: OpportunityItem) {
   return [nextItem, ...items.filter((item) => item.id !== nextItem.id)];
@@ -35,18 +37,20 @@ export function OpportunitiesScreen() {
   const role = useCrmRole();
   const [opportunities, setOpportunities] = useState<OpportunityItem[]>(seedOpportunities);
   const [accounts, setAccounts] = useState<Array<{ id: string; label: string; searchText?: string }>>([]);
-  const [stages, setStages] = useState<Array<{ id: string; label: string }>>([]);
+  const [stages, setStages] = useState<Array<{ id: string; label: string; probability?: number }>>([]);
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [isViewMode, setIsViewMode] = useState(false);
   const [accountSearch, setAccountSearch] = useState("");
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [service, setService] = useState("");
+  const [leadSource, setLeadSource] = useState(LEAD_SOURCE_OPTIONS[0]?.id ?? "");
   const [accountId, setAccountId] = useState("");
   const [stageId, setStageId] = useState("");
   const [nextStep, setNextStep] = useState("");
   const [amount, setAmount] = useState("");
   const [isRecurring, setIsRecurring] = useState(false);
   const [months, setMonths] = useState("1");
+  const [manualProbability, setManualProbability] = useState("");
   const [expectedCloseDate, setExpectedCloseDate] = useState("");
   const [conclusionStatus, setConclusionStatus] = useState("");
   const [conclusionReason, setConclusionReason] = useState("");
@@ -70,6 +74,9 @@ export function OpportunitiesScreen() {
   const [draggedOpportunityId, setDraggedOpportunityId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [recentlyMovedOpportunityId, setRecentlyMovedOpportunityId] = useState<string | null>(null);
+  const [nearestOpenCloseDate, setNearestOpenCloseDate] = useState<string | null>(null);
+  const [averageProbability, setAverageProbability] = useState(0);
+  const [forecastMonth, setForecastMonth] = useState(0);
   const isDragDropEnabled = settings.features.pipeline_drag_drop;
 
   useEffect(() => {
@@ -105,12 +112,19 @@ export function OpportunitiesScreen() {
     let isMounted = true;
 
     async function load() {
-      const [nextOpportunities, refs] = await Promise.all([getOpportunities(), getReferenceOptions()]);
+      const [nextOpportunities, refs, stats] = await Promise.all([
+        getOpportunities(),
+        getReferenceOptions(),
+        getPipelineStatistics()
+      ]);
 
       if (isMounted) {
         setOpportunities(nextOpportunities);
         setAccounts(refs.accounts);
         setStages(refs.stages);
+        setNearestOpenCloseDate(stats.nearestCloseDate);
+        setAverageProbability(stats.averageProbability);
+        setForecastMonth(stats.forecastMonth);
         setAccountId((current) => current || refs.accounts[0]?.id || "");
         setAccountSearch((current) => current || refs.accounts[0]?.label || "");
         setStageId((current) => current || refs.stages[0]?.id || "");
@@ -150,6 +164,23 @@ export function OpportunitiesScreen() {
     () => stages.find((item) => item.id === stageId)?.label ?? DEFAULT_STAGE_OPTIONS.find((item) => item.id === stageId)?.label ?? "",
     [stageId, stages]
   );
+  const selectedStageProbability = useMemo(
+    () => stages.find((item) => item.id === stageId)?.probability ?? DEFAULT_STAGE_OPTIONS.find((item) => item.id === stageId)?.probability ?? 0,
+    [stageId, stages]
+  );
+  const hasManualProbability = useMemo(() => {
+    const parsed = Number(manualProbability);
+    return manualProbability.trim() !== "" && Number.isFinite(parsed);
+  }, [manualProbability]);
+  const effectiveProbability = useMemo(() => {
+    const parsed = Number(manualProbability);
+
+    if (hasManualProbability) {
+      return Math.max(0, Math.min(100, parsed));
+    }
+
+    return selectedStageProbability;
+  }, [hasManualProbability, manualProbability, selectedStageProbability]);
   const showConclusionFields = isConclusionStage(selectedStageLabel);
   const shouldShowConclusionFields = showConclusionFields || isConclusionMode;
   const boardColumns = useMemo(
@@ -196,10 +227,12 @@ export function OpportunitiesScreen() {
   function resetForm() {
     setEditingId(null);
     setService("");
+    setLeadSource(LEAD_SOURCE_OPTIONS[0]?.id ?? "");
     setAmount("");
     setNextStep("");
     setIsRecurring(false);
     setMonths("1");
+    setManualProbability("");
     setExpectedCloseDate("");
     setConclusionStatus("");
     setConclusionReason("");
@@ -304,10 +337,16 @@ export function OpportunitiesScreen() {
   function populateOpportunity(opportunity: OpportunityItem) {
     setEditingId(opportunity.id);
     setService(opportunity.title);
+    setLeadSource(leadSourceIdFromLabel(opportunity.leadSource));
     setNextStep(opportunity.nextStep ?? "");
     setAmount(String(amountToNumber(opportunity.baseAmount)));
     setIsRecurring(opportunity.isRecurring);
     setMonths(String(opportunity.months));
+    setManualProbability(
+      typeof opportunity.manualProbability === "number" && Number.isFinite(opportunity.manualProbability)
+        ? String(opportunity.manualProbability)
+        : ""
+    );
     setExpectedCloseDate(toInputDate(opportunity.expectedCloseDate));
     setStageId(
       stages.find((item) => item.label === opportunity.stage)?.id ??
@@ -370,11 +409,13 @@ export function OpportunitiesScreen() {
             title: service,
             stageId,
             stageLabel: selectedStageLabel,
+            leadSource: leadSourceLabelFromId(leadSource),
             nextStep,
             amount: calculatedTicket,
             baseAmount: Number(amount || 0),
             isRecurring,
             months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
+            probability: hasManualProbability ? effectiveProbability : undefined,
             expectedCloseDate,
             status: nextStatus,
             conclusionStatus: showConclusionFields ? conclusionStatus : undefined,
@@ -427,11 +468,13 @@ export function OpportunitiesScreen() {
             title: service,
             accountId: normalizedAccountId,
             stageId,
+            leadSource: leadSourceLabelFromId(leadSource),
             nextStep,
             amount: calculatedTicket,
             baseAmount: Number(amount || 0),
           isRecurring,
           months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
+          probability: hasManualProbability ? effectiveProbability : undefined,
           expectedCloseDate,
           status: nextStatus,
             conclusionStatus: showConclusionFields ? conclusionStatus : undefined,
@@ -474,7 +517,9 @@ export function OpportunitiesScreen() {
     }
 
     const conclusionStage =
-      stages.find((item) => item.label === "Conclusao") ?? DEFAULT_STAGE_OPTIONS.find((item) => item.label === "Conclusao");
+      stages.find((item) => item.label === "Fechamento") ??
+      stages.find((item) => item.label === "Conclusao") ??
+      DEFAULT_STAGE_OPTIONS.find((item) => item.label === "Fechamento");
 
     if (!conclusionStage) {
       setFeedback("Nao foi possivel localizar a etapa de conclusao.");
@@ -512,7 +557,9 @@ export function OpportunitiesScreen() {
     }
 
     const conclusionStage =
-      stages.find((item) => item.label === "Conclusao") ?? DEFAULT_STAGE_OPTIONS.find((item) => item.label === "Conclusao");
+      stages.find((item) => item.label === "Fechamento") ??
+      stages.find((item) => item.label === "Conclusao") ??
+      DEFAULT_STAGE_OPTIONS.find((item) => item.label === "Fechamento");
 
     if (!conclusionStage) {
       setFeedback("Nao foi possivel localizar a etapa de conclusao.");
@@ -526,11 +573,13 @@ export function OpportunitiesScreen() {
           title: service,
           stageId: conclusionStage.id,
           stageLabel: conclusionStage.label,
+          leadSource: leadSourceLabelFromId(leadSource),
           nextStep,
           amount: calculatedTicket,
           baseAmount: Number(amount || 0),
           isRecurring,
           months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
+          probability: hasManualProbability ? effectiveProbability : undefined,
           expectedCloseDate,
           status: conclusionStatus || "Conquistado",
           conclusionStatus: conclusionStatus || "Conquistado",
@@ -634,6 +683,8 @@ export function OpportunitiesScreen() {
         viewMode={isViewMode}
         service={service}
         onServiceChange={setService}
+        leadSource={leadSource}
+        onLeadSourceChange={setLeadSource}
         nextStep={nextStep}
         onNextStepChange={setNextStep}
         accountSearch={accountSearch}
@@ -652,6 +703,10 @@ export function OpportunitiesScreen() {
         onRecurringChange={setIsRecurring}
         months={months}
         onMonthsChange={setMonths}
+        manualProbability={manualProbability}
+        onManualProbabilityChange={setManualProbability}
+        hasManualProbability={hasManualProbability}
+        effectiveProbability={effectiveProbability}
         expectedCloseDate={expectedCloseDate}
         onExpectedCloseDateChange={setExpectedCloseDate}
         showConclusionFields={showConclusionFields}
@@ -672,7 +727,10 @@ export function OpportunitiesScreen() {
         }}
         onSubmit={handleSubmit}
         isPending={isPending}
-        canSubmit={Boolean(editingId ? canEdit : canCreate) && Boolean(accountId)}
+        canSubmit={
+          Boolean(editingId ? canEdit : canCreate) &&
+          Boolean(accountId && service.trim() && amount.trim() && stageId && expectedCloseDate)
+        }
         canConclude={Boolean(editingId && canEdit && (!showConclusionFields || isConclusionMode))}
         isConclusionMode={isConclusionMode}
       />
@@ -763,7 +821,9 @@ export function OpportunitiesScreen() {
       >
         <MetricCard label="Oportunidades" value={String(opportunities.length)} />
         <MetricCard label="Pipeline" value={formatCurrency(totalAmount)} />
-        <MetricCard label="Fechamento mais proximo" value={opportunities[0]?.expectedCloseDate ?? "Sem data"} />
+        <MetricCard label="Probabilidade media" value={`${averageProbability}%`} />
+        <MetricCard label="Previsao do mes" value={formatCurrency(forecastMonth)} />
+        <MetricCard label="Fechamento mais proximo" value={formatNearestCloseDate(nearestOpenCloseDate)} />
       </section>
 
       <section
@@ -952,6 +1012,9 @@ export function OpportunitiesScreen() {
                       >
                         {opportunity.company}
                       </div>
+                      <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 12, lineHeight: 1.4 }}>
+                        Origem: {opportunity.leadSource || "Sem origem"}
+                      </div>
                       <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
                         Proximo passo: {opportunity.nextStep ?? "Definir proximo passo"}
                       </div>
@@ -967,16 +1030,38 @@ export function OpportunitiesScreen() {
                       >
                         <div
                           style={{
-                            display: "inline-flex",
-                            padding: "6px 10px",
-                            borderRadius: 999,
-                            background: "rgba(20, 184, 166, 0.12)",
-                            color: "#0f766e",
-                            fontSize: 11,
-                            fontWeight: 800
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                            alignItems: "center"
                           }}
                         >
-                          {opportunity.amount}
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              background: "rgba(20, 184, 166, 0.12)",
+                              color: "#0f766e",
+                              fontSize: 11,
+                              fontWeight: 800
+                            }}
+                          >
+                            {opportunity.amount}
+                          </div>
+                          <div
+                            style={{
+                              display: "inline-flex",
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              background: "rgba(79, 70, 229, 0.08)",
+                              color: "var(--accent)",
+                              fontSize: 11,
+                              fontWeight: 800
+                            }}
+                          >
+                            {opportunity.probability}%
+                          </div>
                         </div>
                         <div
                           style={{
@@ -989,6 +1074,9 @@ export function OpportunitiesScreen() {
                         >
                           Responsavel: {opportunity.owner}
                         </div>
+                      </div>
+                      <div style={{ marginTop: 10, color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
+                        Valor ponderado: {formatCurrency(amountToNumber(opportunity.amount) * (opportunity.probability / 100))}
                       </div>
                     </button>
                   ))
@@ -1319,6 +1407,8 @@ function OpportunityFormModal({
   viewMode,
   service,
   onServiceChange,
+  leadSource,
+  onLeadSourceChange,
   nextStep,
   onNextStepChange,
   accountSearch,
@@ -1337,6 +1427,10 @@ function OpportunityFormModal({
   onRecurringChange,
   months,
   onMonthsChange,
+  manualProbability,
+  onManualProbabilityChange,
+  hasManualProbability,
+  effectiveProbability,
   expectedCloseDate,
   onExpectedCloseDateChange,
   showConclusionFields,
@@ -1362,6 +1456,8 @@ function OpportunityFormModal({
   viewMode: boolean;
   service: string;
   onServiceChange: (value: string) => void;
+  leadSource: string;
+  onLeadSourceChange: (value: string) => void;
   nextStep: string;
   onNextStepChange: (value: string) => void;
   accountSearch: string;
@@ -1380,6 +1476,10 @@ function OpportunityFormModal({
   onRecurringChange: (value: boolean) => void;
   months: string;
   onMonthsChange: (value: string) => void;
+  manualProbability: string;
+  onManualProbabilityChange: (value: string) => void;
+  hasManualProbability: boolean;
+  effectiveProbability: number;
   expectedCloseDate: string;
   onExpectedCloseDateChange: (value: string) => void;
   showConclusionFields: boolean;
@@ -1503,6 +1603,13 @@ function OpportunityFormModal({
                 required
                 disabled={viewMode}
               />
+              <SelectField
+                label="Origem do lead"
+                value={leadSource}
+                onChange={onLeadSourceChange}
+                options={LEAD_SOURCE_OPTIONS}
+                disabled={viewMode}
+              />
               <Field
                 label="Proximo passo"
                 value={nextStep}
@@ -1548,6 +1655,13 @@ function OpportunityFormModal({
                 onChange={onMonthsChange}
                 placeholder="6"
                 disabled={viewMode || !isRecurring}
+              />
+              <Field
+                label="Probabilidade manual (%)"
+                value={manualProbability}
+                onChange={onManualProbabilityChange}
+                placeholder="Ex.: 70"
+                disabled={viewMode}
               />
               <DateField
                 label="Fechamento"
@@ -1634,7 +1748,12 @@ function OpportunityFormModal({
               </div>
               <div style={{ marginTop: 14, display: "grid", gap: 12 }}>
                 <ModalStat label="Conta" value={accountSearch || "Selecione uma conta"} />
+                <ModalStat label="Origem" value={leadSourceLabelFromId(leadSource)} />
                 <ModalStat label="Fase" value={stages.find((item) => item.id === stageId)?.label || "Selecione"} />
+                <ModalStat
+                  label="Probabilidade"
+                  value={`${effectiveProbability}%${hasManualProbability ? " manual" : " pela etapa"}`}
+                />
                 <ModalStat label="Ticket" value={formatCurrency(calculatedTicket)} strong />
               </div>
             </div>
@@ -1655,7 +1774,8 @@ function OpportunityFormModal({
                 {formatCurrency(calculatedTicket)}
               </div>
               <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.55 }}>
-                {isRecurring ? `Valor base multiplicado por ${months || "1"} mes(es).` : "Valor unico da oportunidade."}
+                {isRecurring ? `Valor base multiplicado por ${months || "1"} mes(es).` : "Valor unico da oportunidade."}{" "}
+                Valor ponderado: {formatCurrency(calculatedTicket * (effectiveProbability / 100))}.
               </div>
             </div>
           </div>
@@ -2111,6 +2231,33 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
+}
+
+function formatNearestCloseDate(value: string | null) {
+  if (!value) {
+    return "Sem data";
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Sem data";
+  }
+
+  return parsed.toLocaleDateString("pt-BR");
+}
+
+function leadSourceLabelFromId(value: string) {
+  return LEAD_SOURCE_OPTIONS.find((item) => item.id === value)?.label ?? "Sem origem";
+}
+
+function leadSourceIdFromLabel(value: string | undefined) {
+  if (!value) {
+    return LEAD_SOURCE_OPTIONS[0]?.id ?? "";
+  }
+
+  const match = LEAD_SOURCE_OPTIONS.find((item) => item.label.toLowerCase() === value.trim().toLowerCase());
+  return match?.id ?? LEAD_SOURCE_OPTIONS[0]?.id ?? "";
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {

@@ -73,6 +73,8 @@ create table if not exists public.opportunities (
   is_recurring boolean not null default false,
   months integer not null default 1 check (months >= 1),
   amount numeric(12,2) not null default 0,
+  probability_override integer check (probability_override between 0 and 100),
+  lead_source text,
   expected_close_date date,
   loss_reason text,
   created_at timestamptz not null default now(),
@@ -105,6 +107,12 @@ alter table public.opportunities
   add column if not exists conclusion_status text,
   add column if not exists conclusion_reason text,
   add column if not exists concluded_at timestamptz;
+
+alter table public.opportunities
+  add column if not exists probability_override integer;
+
+alter table public.opportunities
+  add column if not exists lead_source text;
 
 create table if not exists public.activities (
   id uuid primary key default gen_random_uuid(),

@@ -88,6 +88,7 @@ export type OpportunityItem = {
   id: string;
   title: string;
   company: string;
+  leadSource?: string;
   stage: string;
   owner: string;
   nextStep?: string;
@@ -95,6 +96,8 @@ export type OpportunityItem = {
   isRecurring: boolean;
   months: number;
   amount: string;
+  probability: number;
+  manualProbability?: number;
   expectedCloseDate: string;
   status: string;
   conclusionStatus?: string;
@@ -108,4 +111,27 @@ export type DashboardData = {
   tasks: TaskItem[];
   agenda: AgendaItem[];
   activity: ActivityItem[];
+};
+
+export type PipelineStatistics = {
+  totalPipeline: number;
+  weightedPipeline: number;
+  averageProbability: number;
+  forecastMonth: number;
+  openOpportunities: number;
+  dueThisMonth: number;
+  nearestCloseDate: string | null;
+  byStage: Array<{
+    stage: string;
+    probability: number;
+    count: number;
+    total: number;
+    weightedTotal: number;
+  }>;
+  leadSources: Array<{
+    source: string;
+    count: number;
+    percentage: number;
+    total: number;
+  }>;
 };
