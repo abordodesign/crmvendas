@@ -34,6 +34,7 @@ export function AgendaScreen() {
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [opportunityOptions, setOpportunityOptions] = useState<OpportunityItem[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [itemPendingDelete, setItemPendingDelete] = useState<AgendaItem | null>(null);
   const [draggedAgendaId, setDraggedAgendaId] = useState<string | null>(null);
   const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
   const [notifiedIds, setNotifiedIds] = useState<string[]>([]);
@@ -198,14 +199,23 @@ export function AgendaScreen() {
   }
 
   function removeItem(item: AgendaItem) {
+    setItemPendingDelete(item);
+  }
+
+  function confirmDelete() {
+    if (!itemPendingDelete) {
+      return;
+    }
+
     startTransition(() => {
       void (async () => {
         const success = await deleteAgendaEntry({
-          id: item.id,
-          title: item.title
+          id: itemPendingDelete.id,
+          title: itemPendingDelete.title
         });
 
         setFeedback(success ? "Compromisso removido." : "Nao foi possivel remover o compromisso.");
+        setItemPendingDelete(null);
       })();
     });
   }
@@ -273,6 +283,12 @@ export function AgendaScreen() {
         }}
         onSubmit={saveItem}
         isPending={isPending}
+      />
+      <DeleteAgendaModal
+        item={itemPendingDelete}
+        isPending={isPending}
+        onClose={() => setItemPendingDelete(null)}
+        onConfirm={confirmDelete}
       />
 
       {!settings.features.agenda_module ? (
@@ -414,6 +430,46 @@ export function AgendaScreen() {
         )}
       </section>
     </CrmShell>
+  );
+}
+
+function DeleteAgendaModal({
+  item,
+  isPending,
+  onClose,
+  onConfirm
+}: {
+  item: AgendaItem | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!item) {
+    return null;
+  }
+
+  return (
+    <div style={overlayStyle} onClick={onClose}>
+      <div style={confirmModalStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
+        <h2 style={modalTitleStyle}>Excluir compromisso?</h2>
+        <div style={confirmTextStyle}>Confira os dados antes de remover este compromisso da agenda.</div>
+        <div style={confirmGridStyle}>
+          <FieldReadOnly label="Titulo" value={item.title} />
+          <FieldReadOnly label="Horario" value={item.time} />
+          <FieldReadOnly label="Tipo" value={item.category ?? "Reuniao"} />
+          <FieldReadOnly label="Cliente" value={item.accountName || "-"} />
+        </div>
+        <div style={confirmActionsStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            Cancelar
+          </button>
+          <button type="button" onClick={onConfirm} disabled={isPending} style={dangerButtonStyle}>
+            {isPending ? "Excluindo..." : "Excluir compromisso"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -670,6 +726,15 @@ function Select({
         ))}
       </select>
     </label>
+  );
+}
+
+function FieldReadOnly({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <span style={labelStyle}>{label}</span>
+      <div style={readOnlyValueStyle}>{value}</div>
+    </div>
   );
 }
 
@@ -938,6 +1003,15 @@ const modalStyle: React.CSSProperties = {
   padding: 24
 };
 
+const confirmModalStyle: React.CSSProperties = {
+  width: "min(680px, calc(100vw - 24px))",
+  borderRadius: 24,
+  background: "#ffffff",
+  border: "1px solid var(--line)",
+  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.16)",
+  padding: 24
+};
+
 const badgeStyle: React.CSSProperties = {
   display: "inline-flex",
   padding: "6px 10px",
@@ -972,6 +1046,39 @@ const labelStyle: React.CSSProperties = {
   textTransform: "uppercase"
 };
 
+const confirmEyebrowStyle: React.CSSProperties = {
+  color: "#b91c1c",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
+};
+
+const confirmTextStyle: React.CSSProperties = {
+  marginTop: 10,
+  color: "var(--muted)",
+  lineHeight: 1.6
+};
+
+const confirmGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+  padding: 16,
+  borderRadius: 18,
+  background: "var(--surface-elevated)",
+  border: "1px solid var(--line)"
+};
+
+const confirmActionsStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap"
+};
+
 const inputStyle: React.CSSProperties = {
   minHeight: 44,
   borderRadius: 12,
@@ -990,6 +1097,15 @@ const textAreaStyle: React.CSSProperties = {
   font: "inherit",
   background: "#ffffff",
   resize: "vertical"
+};
+
+const readOnlyValueStyle: React.CSSProperties = {
+  minHeight: 44,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "11px 14px",
+  background: "#ffffff",
+  fontWeight: 700
 };
 
 const primaryButtonStyle: React.CSSProperties = {

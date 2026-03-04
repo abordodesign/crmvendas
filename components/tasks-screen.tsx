@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { CrmShell, pillStyle } from "@/components/crm-shell";
 import { hasPermission } from "@/lib/access-control";
-import { completeTask, createTask, getTasks, updateTask } from "@/lib/crm-data-source";
+import { completeTask, createTask, deleteTask, getTasks, updateTask } from "@/lib/crm-data-source";
 import { seedTasks } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
 import type { TaskItem } from "@/types/crm-app";
@@ -24,6 +24,7 @@ export function TasksScreen() {
   const [dueTime, setDueTime] = useState("");
   const [priority, setPriority] = useState(PRIORITY_OPTIONS[1].id);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [taskPendingDelete, setTaskPendingDelete] = useState<TaskItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -179,6 +180,41 @@ export function TasksScreen() {
     });
   }
 
+  function requestDelete(task: TaskItem) {
+    if (!canEdit) {
+      setFeedback("Seu perfil nao pode excluir tarefas.");
+      return;
+    }
+
+    setTaskPendingDelete(task);
+    setFeedback(null);
+  }
+
+  function confirmDelete() {
+    if (!taskPendingDelete) {
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        const currentTask = taskPendingDelete;
+        const success = await deleteTask({
+          id: currentTask.id,
+          title: currentTask.title
+        });
+
+        if (success) {
+          setTasks((current) => current.filter((task) => task.id !== currentTask.id));
+          setFeedback("Tarefa excluida.");
+        } else {
+          setFeedback("Nao foi possivel excluir a tarefa.");
+        }
+
+        setTaskPendingDelete(null);
+      })();
+    });
+  }
+
   return (
     <CrmShell
       activePath="/dashboard/tasks"
@@ -207,6 +243,12 @@ export function TasksScreen() {
         onSubmit={handleSubmit}
         isPending={isPending}
         canSubmit={Boolean(editingId ? canEdit : canCreate) && Boolean(title.trim())}
+      />
+      <DeleteTaskModal
+        task={taskPendingDelete}
+        isPending={isPending}
+        onClose={() => setTaskPendingDelete(null)}
+        onConfirm={confirmDelete}
       />
 
       <section
@@ -348,6 +390,17 @@ export function TasksScreen() {
                   >
                     Concluir
                   </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      requestDelete(task);
+                    }}
+                    disabled={!canEdit}
+                    style={deleteButtonStyle}
+                  >
+                    Excluir
+                  </button>
                 </div>
               </div>
 
@@ -366,6 +419,46 @@ export function TasksScreen() {
         </div>
       </section>
     </CrmShell>
+  );
+}
+
+function DeleteTaskModal({
+  task,
+  isPending,
+  onClose,
+  onConfirm
+}: {
+  task: TaskItem | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!task) {
+    return null;
+  }
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
+        <h2 style={modalTitleStyle}>Excluir tarefa?</h2>
+        <div style={feedbackDescriptionStyle}>Confira os dados antes de remover esta tarefa do sistema.</div>
+        <div style={summaryBoxStyle}>
+          <ModalStat label="Titulo" value={task.title} />
+          <ModalStat label="Empresa" value={task.company} />
+          <ModalStat label="Execucao" value={task.due} />
+          <ModalStat label="Prioridade" value={task.priority} />
+        </div>
+        <div style={modalFooterStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            Cancelar
+          </button>
+          <button type="button" onClick={onConfirm} disabled={isPending} style={deleteButtonStyle}>
+            {isPending ? "Excluindo..." : "Excluir tarefa"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -755,6 +848,13 @@ const warningStyle: React.CSSProperties = {
   fontWeight: 700
 };
 
+const feedbackDescriptionStyle: React.CSSProperties = {
+  marginTop: 10,
+  color: "var(--muted)",
+  fontSize: 14,
+  lineHeight: 1.6
+};
+
 const editButtonStyle: React.CSSProperties = {
   border: 0,
   borderRadius: 14,
@@ -772,6 +872,17 @@ const completeButtonStyle: React.CSSProperties = {
   padding: "8px 12px",
   background: "rgba(20, 184, 166, 0.12)",
   color: "#0f766e",
+  fontWeight: 800,
+  fontSize: 13,
+  cursor: "pointer"
+};
+
+const deleteButtonStyle: React.CSSProperties = {
+  border: 0,
+  borderRadius: 14,
+  padding: "8px 12px",
+  background: "rgba(220, 38, 38, 0.1)",
+  color: "#b91c1c",
   fontWeight: 800,
   fontSize: 13,
   cursor: "pointer"
@@ -798,6 +909,12 @@ const modalCardStyle: React.CSSProperties = {
   border: "1px solid var(--line)",
   boxShadow: "0 24px 64px rgba(15, 23, 42, 0.16)",
   padding: 24
+};
+
+const confirmCardStyle: React.CSSProperties = {
+  ...modalCardStyle,
+  width: "min(720px, calc(100vw - 24px))",
+  maxHeight: "unset"
 };
 
 const modalHeaderStyle: React.CSSProperties = {
@@ -833,6 +950,14 @@ const modalBadgeStyle: React.CSSProperties = {
   fontSize: 11,
   fontWeight: 800,
   letterSpacing: "0.06em",
+  textTransform: "uppercase"
+};
+
+const confirmEyebrowStyle: React.CSSProperties = {
+  color: "#b91c1c",
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
   textTransform: "uppercase"
 };
 

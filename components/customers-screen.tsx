@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { CustomerFormModal } from "@/components/customer-form-modal";
 import { CrmShell, pillStyle } from "@/components/crm-shell";
-import { createCustomer, getCustomers, updateCustomer } from "@/lib/crm-data-source";
+import { createCustomer, deleteCustomer, getCustomers, updateCustomer } from "@/lib/crm-data-source";
 import { hasPermission } from "@/lib/access-control";
 import { seedCustomers } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
@@ -25,6 +25,7 @@ export function CustomersScreen() {
   const [document, setDocument] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [customerPendingDelete, setCustomerPendingDelete] = useState<CustomerItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -184,6 +185,41 @@ export function CustomersScreen() {
     handleCreateCustomer(event);
   }
 
+  function requestDelete(customer: CustomerItem) {
+    if (!canManageCustomers) {
+      setFeedback("Seu perfil nao pode excluir clientes.");
+      return;
+    }
+
+    setCustomerPendingDelete(customer);
+    setFeedback(null);
+  }
+
+  function confirmDelete() {
+    if (!customerPendingDelete) {
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        const currentCustomer = customerPendingDelete;
+        const success = await deleteCustomer({
+          id: currentCustomer.id,
+          tradeName: currentCustomer.tradeName
+        });
+
+        if (success) {
+          setCustomers((current) => current.filter((item) => item.id !== currentCustomer.id));
+          setFeedback("Cliente excluido.");
+        } else {
+          setFeedback("Nao foi possivel excluir o cliente.");
+        }
+
+        setCustomerPendingDelete(null);
+      })();
+    });
+  }
+
   return (
     <CrmShell
       activePath="/dashboard/customers"
@@ -232,6 +268,12 @@ export function CustomersScreen() {
           } as React.FormEvent<HTMLFormElement>)
         }
         isPending={isPending}
+      />
+      <DeleteCustomerModal
+        customer={customerPendingDelete}
+        isPending={isPending}
+        onClose={() => setCustomerPendingDelete(null)}
+        onConfirm={confirmDelete}
       />
       <section
         style={{
@@ -357,6 +399,14 @@ export function CustomersScreen() {
                     >
                       Editar
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => requestDelete(customer)}
+                      disabled={!canManageCustomers}
+                      style={deleteButtonStyle}
+                    >
+                      Excluir
+                    </button>
                   </div>
                 </div>
               </div>
@@ -411,6 +461,48 @@ export function CustomersScreen() {
         </div>
       </section>
     </CrmShell>
+  );
+}
+
+function DeleteCustomerModal({
+  customer,
+  isPending,
+  onClose,
+  onConfirm
+}: {
+  customer: CustomerItem | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!customer) {
+    return null;
+  }
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
+        <h2 style={confirmTitleStyle}>Excluir cliente?</h2>
+        <div style={confirmTextStyle}>Confira os dados antes de remover definitivamente este cadastro.</div>
+        <div style={confirmDataGridStyle}>
+          <DataCell label="Nome fantasia" value={customer.tradeName} />
+          <DataCell label="Razao social" value={customer.legalName} />
+          <DataCell label="Contato" value={customer.companyContactName || "-"} />
+          <DataCell label="Telefone" value={customer.phone || "-"} />
+          <DataCell label="E-mail" value={customer.email || "-"} />
+          <DataCell label="Documento" value={customer.document || "-"} />
+        </div>
+        <div style={confirmActionsStyle}>
+          <button type="button" onClick={onClose} style={cancelButtonStyle}>
+            Cancelar
+          </button>
+          <button type="button" onClick={onConfirm} disabled={isPending} style={deleteButtonStyle}>
+            {isPending ? "Excluindo..." : "Excluir cliente"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -517,6 +609,16 @@ const editButtonStyle: React.CSSProperties = {
   cursor: "pointer"
 };
 
+const deleteButtonStyle: React.CSSProperties = {
+  border: 0,
+  borderRadius: 12,
+  padding: "10px 12px",
+  background: "rgba(220, 38, 38, 0.1)",
+  color: "#b91c1c",
+  fontWeight: 800,
+  cursor: "pointer"
+};
+
 const whatsAppButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
@@ -534,4 +636,74 @@ const disabledWhatsAppButtonStyle: React.CSSProperties = {
   ...whatsAppButtonStyle,
   opacity: 0.45,
   cursor: "not-allowed"
+};
+
+const modalOverlayStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 60,
+  background: "rgba(15, 23, 42, 0.42)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 20
+};
+
+const confirmCardStyle: React.CSSProperties = {
+  width: "min(640px, calc(100vw - 24px))",
+  borderRadius: 24,
+  background: "#ffffff",
+  border: "1px solid var(--line)",
+  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.16)",
+  padding: 24
+};
+
+const confirmEyebrowStyle: React.CSSProperties = {
+  color: "#b91c1c",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
+};
+
+const confirmTitleStyle: React.CSSProperties = {
+  margin: "10px 0 0",
+  fontSize: "1.4rem",
+  fontWeight: 900,
+  letterSpacing: "-0.03em"
+};
+
+const confirmTextStyle: React.CSSProperties = {
+  marginTop: 10,
+  color: "var(--muted)",
+  lineHeight: 1.6
+};
+
+const confirmDataGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+  padding: 16,
+  borderRadius: 18,
+  background: "var(--surface-elevated)",
+  border: "1px solid var(--line)"
+};
+
+const confirmActionsStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap"
+};
+
+const cancelButtonStyle: React.CSSProperties = {
+  minHeight: 44,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "10px 12px",
+  background: "#ffffff",
+  fontWeight: 800,
+  cursor: "pointer"
 };

@@ -328,6 +328,16 @@ function saveLocalCustomer(item: CustomerItem) {
   notifyCrmDataChanged();
 }
 
+function removeLocalCustomer(customerId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const next = getLocalCustomers().filter((item) => item.id !== customerId);
+  window.localStorage.setItem(LOCAL_CUSTOMERS_KEY, JSON.stringify(next));
+  notifyCrmDataChanged();
+}
+
 function mergeCustomers(remote: CustomerItem[], local: CustomerItem[]) {
   const byId = new Map<string, CustomerItem>();
 
@@ -387,6 +397,16 @@ function updateLocalOpportunityPreview(item: OpportunityItem) {
   const current = getLocalOpportunityPreviews();
   const hasExisting = current.some((entry) => entry.id === item.id);
   const next = hasExisting ? current.map((entry) => (entry.id === item.id ? item : entry)) : [item, ...current];
+  window.localStorage.setItem(LOCAL_OPPORTUNITIES_KEY, JSON.stringify(next));
+  notifyCrmDataChanged();
+}
+
+function removeLocalOpportunityPreview(opportunityId: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const next = getLocalOpportunityPreviews().filter((item) => item.id !== opportunityId);
   window.localStorage.setItem(LOCAL_OPPORTUNITIES_KEY, JSON.stringify(next));
   notifyCrmDataChanged();
 }
@@ -1646,6 +1666,42 @@ export async function updateCustomer(input: {
   return customerItem;
 }
 
+export async function deleteCustomer(input: { id: string; tradeName: string }): Promise<boolean> {
+  if (input.id.startsWith("local-customer-")) {
+    removeLocalCustomer(input.id);
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "removeu cliente",
+      target: input.tradeName,
+      eventType: "customer",
+      subject: input.tradeName,
+      kind: "note",
+      forceLocal: true
+    });
+    return true;
+  }
+
+  const { error } = await supabase.from("accounts").delete().eq("id", input.id);
+
+  if (error) {
+    return false;
+  }
+
+  removeLocalCustomer(input.id);
+  const context = await getCurrentUserContext();
+  await recordCrmActivity({
+    actor: context?.fullName ?? "Equipe",
+    action: "removeu cliente",
+    target: input.tradeName,
+    eventType: "customer",
+    subject: input.tradeName,
+    kind: "note",
+    forceLocal: !context
+  });
+
+  return true;
+}
+
 export async function createOpportunity(input: {
   title: string;
   accountId: string;
@@ -1872,6 +1928,42 @@ export async function updateOpportunity(input: {
   });
   notifyCrmDataChanged();
   return updatedItem;
+}
+
+export async function deleteOpportunity(input: { id: string; title: string }): Promise<boolean> {
+  if (input.id.startsWith("local-opportunity-")) {
+    removeLocalOpportunityPreview(input.id);
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "removeu oportunidade",
+      target: input.title,
+      eventType: "opportunity",
+      subject: input.title,
+      kind: "note",
+      forceLocal: true
+    });
+    return true;
+  }
+
+  const { error } = await supabase.from("opportunities").delete().eq("id", input.id);
+
+  if (error) {
+    return false;
+  }
+
+  removeLocalOpportunityPreview(input.id);
+  const context = await getCurrentUserContext();
+  await recordCrmActivity({
+    actor: context?.fullName ?? "Equipe",
+    action: "removeu oportunidade",
+    target: input.title,
+    eventType: "opportunity",
+    subject: input.title,
+    kind: "note",
+    forceLocal: !context
+  });
+
+  return true;
 }
 
 export async function moveOpportunityToStage(input: {
@@ -2756,5 +2848,39 @@ export async function completeTask(taskId: string, taskTitle?: string): Promise<
   }
 
   return !error;
+}
+
+export async function deleteTask(input: { id: string; title: string }): Promise<boolean> {
+  if (input.id.startsWith("local-task-")) {
+    await recordCrmActivity({
+      actor: "Equipe",
+      action: "removeu tarefa",
+      target: input.title,
+      eventType: "task",
+      subject: input.title,
+      kind: "task",
+      forceLocal: true
+    });
+    return true;
+  }
+
+  const { error } = await supabase.from("tasks").delete().eq("id", input.id);
+
+  if (error) {
+    return false;
+  }
+
+  const context = await getCurrentUserContext();
+  await recordCrmActivity({
+    actor: context?.fullName ?? "Equipe",
+    action: "removeu tarefa",
+    target: input.title,
+    eventType: "task",
+    subject: input.title,
+    kind: "task",
+    forceLocal: !context
+  });
+
+  return true;
 }
 

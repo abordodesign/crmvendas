@@ -50,6 +50,7 @@ export function DashboardApp() {
   const [agendaCategory, setAgendaCategory] = useState("Reuniao");
   const [agendaFeedback, setAgendaFeedback] = useState<string | null>(null);
   const [agendaFilterToday, setAgendaFilterToday] = useState(true);
+  const [agendaItemPendingDelete, setAgendaItemPendingDelete] = useState<DashboardData["agenda"][number] | null>(null);
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [opportunityOptions, setOpportunityOptions] = useState<OpportunityItem[]>([]);
   const [agendaAccountId, setAgendaAccountId] = useState("");
@@ -212,14 +213,23 @@ export function DashboardApp() {
   }
 
   function handleDeleteAgenda(item: DashboardData["agenda"][number]) {
+    setAgendaItemPendingDelete(item);
+  }
+
+  function confirmDeleteAgenda() {
+    if (!agendaItemPendingDelete) {
+      return;
+    }
+
     startTransition(() => {
       void (async () => {
         const success = await deleteAgendaEntry({
-          id: item.id,
-          title: item.title
+          id: agendaItemPendingDelete.id,
+          title: agendaItemPendingDelete.title
         });
 
         setAgendaFeedback(success ? "Item removido da agenda." : "Nao foi possivel remover o item da agenda.");
+        setAgendaItemPendingDelete(null);
       })();
     });
   }
@@ -342,6 +352,12 @@ export function DashboardApp() {
         }}
         onSubmit={handleSaveAgenda}
         isPending={isPending}
+      />
+      <DeleteDashboardAgendaModal
+        item={agendaItemPendingDelete}
+        isPending={isPending}
+        onClose={() => setAgendaItemPendingDelete(null)}
+        onConfirm={confirmDeleteAgenda}
       />
       <section
         style={{
@@ -1121,6 +1137,55 @@ function AgendaFormModal({
   );
 }
 
+function DeleteDashboardAgendaModal({
+  item,
+  isPending,
+  onClose,
+  onConfirm
+}: {
+  item: DashboardData["agenda"][number] | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!item) {
+    return null;
+  }
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={dashboardConfirmModalStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={dashboardConfirmEyebrowStyle}>Confirmar exclusao</div>
+        <h2 style={agendaTitleStyle}>Excluir horario?</h2>
+        <div style={dashboardConfirmTextStyle}>Confira os dados antes de remover este item da agenda.</div>
+        <div style={dashboardConfirmGridStyle}>
+          <DashboardConfirmField label="Titulo" value={item.title} />
+          <DashboardConfirmField label="Hora" value={item.time} />
+          <DashboardConfirmField label="Tipo" value={item.category ?? "Reuniao"} />
+          <DashboardConfirmField label="Cliente" value={item.accountName || "-"} />
+        </div>
+        <div style={dashboardConfirmActionsStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            Cancelar
+          </button>
+          <button type="button" onClick={onConfirm} disabled={isPending} style={miniDangerButtonStyle}>
+            {isPending ? "Excluindo..." : "Excluir"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DashboardConfirmField({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={controlFieldStyle}>
+      <span style={controlLabelStyle}>{label}</span>
+      <div style={dashboardConfirmValueStyle}>{value}</div>
+    </div>
+  );
+}
+
 function normalizeSearchText(value: string) {
   return value
     .normalize("NFD")
@@ -1244,6 +1309,15 @@ const modalCardStyle: React.CSSProperties = {
   padding: 24
 };
 
+const dashboardConfirmModalStyle: React.CSSProperties = {
+  width: "min(680px, calc(100vw - 24px))",
+  borderRadius: 24,
+  background: "#ffffff",
+  border: "1px solid var(--line)",
+  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.16)",
+  padding: 24
+};
+
 const agendaBadgeStyle: React.CSSProperties = {
   display: "inline-flex",
   padding: "6px 10px",
@@ -1283,6 +1357,48 @@ const agendaTextAreaStyle: React.CSSProperties = {
   background: "#ffffff",
   resize: "vertical",
   minHeight: 108
+};
+
+const dashboardConfirmEyebrowStyle: React.CSSProperties = {
+  color: "#b91c1c",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
+};
+
+const dashboardConfirmTextStyle: React.CSSProperties = {
+  marginTop: 10,
+  color: "var(--muted)",
+  lineHeight: 1.6
+};
+
+const dashboardConfirmGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+  padding: 16,
+  borderRadius: 18,
+  background: "var(--surface-elevated)",
+  border: "1px solid var(--line)"
+};
+
+const dashboardConfirmActionsStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap"
+};
+
+const dashboardConfirmValueStyle: React.CSSProperties = {
+  minHeight: 44,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "11px 14px",
+  background: "#ffffff",
+  fontWeight: 700
 };
 
 const agendaLinkChipStyle: React.CSSProperties = {

@@ -10,6 +10,7 @@ import {
   CONCLUSION_STATUS_OPTIONS,
   DEFAULT_STAGE_OPTIONS,
   createCustomer,
+  deleteOpportunity,
   createOpportunity,
   getOpportunities,
   getReferenceOptions,
@@ -58,6 +59,7 @@ export function OpportunitiesScreen() {
   const [newCustomerZipCode, setNewCustomerZipCode] = useState("");
   const [newCustomerDocument, setNewCustomerDocument] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [opportunityPendingDelete, setOpportunityPendingDelete] = useState<OpportunityItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [draggedOpportunityId, setDraggedOpportunityId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -454,6 +456,41 @@ export function OpportunitiesScreen() {
     });
   }
 
+  function requestDelete(opportunity: OpportunityItem) {
+    if (!canEdit) {
+      setFeedback("Seu perfil nao pode excluir oportunidades.");
+      return;
+    }
+
+    setOpportunityPendingDelete(opportunity);
+    setFeedback(null);
+  }
+
+  function confirmDelete() {
+    if (!opportunityPendingDelete) {
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        const currentOpportunity = opportunityPendingDelete;
+        const success = await deleteOpportunity({
+          id: currentOpportunity.id,
+          title: currentOpportunity.title
+        });
+
+        if (success) {
+          setOpportunities((current) => current.filter((item) => item.id !== currentOpportunity.id));
+          setFeedback("Oportunidade excluida.");
+        } else {
+          setFeedback("Nao foi possivel excluir a oportunidade.");
+        }
+
+        setOpportunityPendingDelete(null);
+      })();
+    });
+  }
+
   return (
     <CrmShell
       activePath="/dashboard/opportunities"
@@ -543,6 +580,12 @@ export function OpportunitiesScreen() {
         }}
         onSubmit={handleCreateCustomerFromModal}
         isPending={isPending}
+      />
+      <DeleteOpportunityModal
+        opportunity={opportunityPendingDelete}
+        isPending={isPending}
+        onClose={() => setOpportunityPendingDelete(null)}
+        onConfirm={confirmDelete}
       />
       <section
         style={{
@@ -908,7 +951,7 @@ export function OpportunitiesScreen() {
                       {opportunity.company}
                     </div>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, flexWrap: "wrap" }}>
                     <button
                       type="button"
                       onClick={(event) => {
@@ -919,6 +962,17 @@ export function OpportunitiesScreen() {
                       style={editButtonStyle}
                     >
                       Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        requestDelete(opportunity);
+                      }}
+                      disabled={!canEdit}
+                      style={deleteButtonStyle}
+                    >
+                      Excluir
                     </button>
                   </div>
                 </div>
@@ -1486,6 +1540,46 @@ function OpportunityFormModal({
   );
 }
 
+function DeleteOpportunityModal({
+  opportunity,
+  isPending,
+  onClose,
+  onConfirm
+}: {
+  opportunity: OpportunityItem | null;
+  isPending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  if (!opportunity) {
+    return null;
+  }
+
+  return (
+    <div style={modalOverlayStyle} onClick={onClose}>
+      <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
+        <h2 style={confirmTitleStyle}>Excluir oportunidade?</h2>
+        <div style={confirmTextStyle}>Revise os dados abaixo antes de remover o registro do funil.</div>
+        <div style={confirmGridStyle}>
+          <CompactCell label="Servico" value={opportunity.title} />
+          <CompactCell label="Conta" value={opportunity.company} />
+          <CompactCell label="Fase" value={opportunity.stage} />
+          <CompactCell label="Ticket" value={opportunity.amount} emphasis />
+        </div>
+        <div style={confirmActionsStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            Cancelar
+          </button>
+          <button type="button" onClick={onConfirm} disabled={isPending} style={deleteButtonStyle}>
+            {isPending ? "Excluindo..." : "Excluir oportunidade"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SearchableAccountField({
   label,
   searchValue,
@@ -1720,6 +1814,17 @@ const editButtonStyle: React.CSSProperties = {
   cursor: "pointer"
 };
 
+const deleteButtonStyle: React.CSSProperties = {
+  border: 0,
+  borderRadius: 14,
+  padding: "8px 12px",
+  background: "rgba(220, 38, 38, 0.1)",
+  color: "#b91c1c",
+  fontWeight: 800,
+  fontSize: 13,
+  cursor: "pointer"
+};
+
 const modalOverlayStyle: React.CSSProperties = {
   position: "fixed",
   inset: 0,
@@ -1741,6 +1846,55 @@ const modalCardStyle: React.CSSProperties = {
   border: "1px solid var(--line)",
   boxShadow: "0 24px 64px rgba(15, 23, 42, 0.16)",
   padding: 24
+};
+
+const confirmCardStyle: React.CSSProperties = {
+  width: "min(720px, calc(100vw - 24px))",
+  borderRadius: 24,
+  background: "#ffffff",
+  border: "1px solid var(--line)",
+  boxShadow: "0 24px 64px rgba(15, 23, 42, 0.16)",
+  padding: 24
+};
+
+const confirmEyebrowStyle: React.CSSProperties = {
+  color: "#b91c1c",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
+};
+
+const confirmTitleStyle: React.CSSProperties = {
+  margin: "10px 0 0",
+  fontSize: "1.4rem",
+  fontWeight: 900,
+  letterSpacing: "-0.03em"
+};
+
+const confirmTextStyle: React.CSSProperties = {
+  marginTop: 10,
+  color: "var(--muted)",
+  lineHeight: 1.6
+};
+
+const confirmGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+  padding: 16,
+  borderRadius: 18,
+  background: "var(--surface-elevated)",
+  border: "1px solid var(--line)"
+};
+
+const confirmActionsStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "flex",
+  justifyContent: "flex-end",
+  gap: 12,
+  flexWrap: "wrap"
 };
 
 const accountMenuStyle: React.CSSProperties = {
