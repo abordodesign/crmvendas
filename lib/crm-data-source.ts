@@ -1,7 +1,7 @@
 "use client";
 
 import { supabase } from "@/lib/supabase";
-import { getCrmSettings } from "@/lib/crm-settings";
+import { getCrmSettings, peekCrmSettings } from "@/lib/crm-settings";
 import {
   seedActivity,
   seedAgenda,
@@ -1399,8 +1399,7 @@ async function getCurrentUserContext() {
       return null;
     }
 
-    const settings = await getCrmSettings();
-    const displayName = settings.displayName?.trim();
+    const displayName = peekCrmSettings().displayName?.trim();
 
     return {
       userId,

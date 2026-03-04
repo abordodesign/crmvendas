@@ -18,6 +18,7 @@ export type CrmSettings = {
 
 const LOCAL_SETTINGS_KEY = "crm_system_settings";
 const SETTINGS_CHANGED_EVENT = "crm:settings-changed";
+const SETTINGS_CACHE_TTL_MS = 5000;
 
 export const defaultCrmSettings: CrmSettings = {
   displayName: "Administrador CRM",
@@ -42,6 +43,12 @@ let currentUserContextCache:
   | {
       expiresAt: number;
       promise: Promise<CurrentSettingsUserContext | null>;
+    }
+  | null = null;
+let currentSettingsCache:
+  | {
+      expiresAt: number;
+      promise: Promise<CrmSettings>;
     }
   | null = null;
 
@@ -72,13 +79,23 @@ function getLocalSettings() {
   }
 }
 
-function saveLocalSettings(settings: CrmSettings) {
+function saveLocalSettings(settings: CrmSettings, notify = true) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(settings));
-  notifyCrmSettingsChanged();
+  const serialized = JSON.stringify(settings);
+  const current = window.localStorage.getItem(LOCAL_SETTINGS_KEY);
+
+  if (current === serialized) {
+    return;
+  }
+
+  window.localStorage.setItem(LOCAL_SETTINGS_KEY, serialized);
+
+  if (notify) {
+    notifyCrmSettingsChanged();
+  }
 }
 
 async function getCurrentUserContext() {
@@ -145,6 +162,7 @@ export function notifyCrmSettingsChanged() {
     return;
   }
 
+  currentSettingsCache = null;
   window.dispatchEvent(new Event(SETTINGS_CHANGED_EVENT));
 }
 
@@ -153,52 +171,87 @@ export function subscribeCrmSettingsChanged(callback: () => void) {
     return () => undefined;
   }
 
-  window.addEventListener(SETTINGS_CHANGED_EVENT, callback);
-  window.addEventListener("storage", callback);
+  const handleChange = () => {
+    currentSettingsCache = null;
+    callback();
+  };
+
+  window.addEventListener(SETTINGS_CHANGED_EVENT, handleChange);
+  window.addEventListener("storage", handleChange);
 
   return () => {
-    window.removeEventListener(SETTINGS_CHANGED_EVENT, callback);
-    window.removeEventListener("storage", callback);
+    window.removeEventListener(SETTINGS_CHANGED_EVENT, handleChange);
+    window.removeEventListener("storage", handleChange);
   };
+}
+
+export function peekCrmSettings(): CrmSettings {
+  return getLocalSettings();
 }
 
 export async function getCrmSettings(): Promise<CrmSettings> {
-  const local = getLocalSettings();
-  const context = await getCurrentUserContext();
-
-  if (!context) {
-    return local;
+  if (currentSettingsCache && currentSettingsCache.expiresAt > Date.now()) {
+    return currentSettingsCache.promise;
   }
 
-  const { data, error } = await supabase
-    .from("app_settings")
-    .select("display_name, company_name, features")
-    .eq("user_id", context.userId)
-    .maybeSingle();
+  const promise = (async () => {
+    const local = getLocalSettings();
+    const context = await getCurrentUserContext();
 
-  if (error || !data) {
-    return local;
-  }
-
-  const next = {
-    displayName: data.display_name || local.displayName,
-    companyName: data.company_name || local.companyName,
-    features: {
-      ...defaultCrmSettings.features,
-      ...(typeof data.features === "object" && data.features ? (data.features as Partial<Record<FeatureKey, boolean>>) : {}),
-      ...local.features
+    if (!context) {
+      return local;
     }
+
+    const { data, error } = await supabase
+      .from("app_settings")
+      .select("display_name, company_name, features")
+      .eq("user_id", context.userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return local;
+    }
+
+    const next = {
+      displayName: data.display_name || local.displayName,
+      companyName: data.company_name || local.companyName,
+      features: {
+        ...defaultCrmSettings.features,
+        ...(typeof data.features === "object" && data.features
+          ? (data.features as Partial<Record<FeatureKey, boolean>>)
+          : {}),
+        ...local.features
+      }
+    };
+
+    saveLocalSettings(next, false);
+    return next;
+  })();
+
+  currentSettingsCache = {
+    expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+    promise
   };
 
-  saveLocalSettings(next);
-  return next;
+  promise.catch(() => {
+    if (currentSettingsCache?.promise === promise) {
+      currentSettingsCache = null;
+    }
+  });
+
+  return promise;
 }
 
 export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSettings> {
-  saveLocalSettings(settings);
+  currentSettingsCache = {
+    expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
+    promise: Promise.resolve(settings)
+  };
+  saveLocalSettings(settings, false);
   const context = await getCurrentUserContext();
 
   if (!context) {
+    notifyCrmSettingsChanged();
     return settings;
   }
 
@@ -217,6 +270,8 @@ export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSetting
   );
 
   if (error) {
+    currentSettingsCache = null;
+    notifyCrmSettingsChanged();
     return settings;
   }
 
