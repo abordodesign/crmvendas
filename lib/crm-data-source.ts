@@ -32,10 +32,16 @@ type ReferenceOption = {
 };
 
 export const LEAD_SOURCE_OPTIONS: ReferenceOption[] = [
-  { id: "instagram", label: "Instagram" },
   { id: "indicacao", label: "Indicacao" },
+  { id: "cliente-ativo", label: "Cliente Ativo" },
+  { id: "whatsapp", label: "WhatsApp" },
+  { id: "instagram", label: "Instagram" },
   { id: "google", label: "Google" },
-  { id: "site", label: "Site" }
+  { id: "linkedin", label: "LinkedIn" },
+  { id: "outbound", label: "Outbound" },
+  { id: "site", label: "Site" },
+  { id: "parceiro", label: "Parceiro" },
+  { id: "outro", label: "Outro" }
 ];
 
 type StoredNotification = NotificationItem & {
