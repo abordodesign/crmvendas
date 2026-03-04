@@ -684,17 +684,18 @@ function buildConversionMetrics(items: PipelineStatsSourceOpportunity[]) {
   ];
 }
 
-function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): PipelineStatistics {
+function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], periodDays: number): PipelineStatistics {
   const openItems = items.filter(isOpenPipelineOpportunity);
-  const currentMonthItems = items.filter((item) => {
+  const now = new Date();
+  const periodStart = new Date(now.getTime() - Math.max(0, periodDays - 1) * 86400000);
+  const periodItems = items.filter((item) => {
     if (!item.createdAt) {
       return false;
     }
 
     const parsed = new Date(item.createdAt);
-    return !Number.isNaN(parsed.getTime()) && isSameMonth(parsed, new Date());
+    return !Number.isNaN(parsed.getTime()) && parsed.getTime() >= periodStart.getTime();
   });
-  const now = new Date();
   const totalPipeline = openItems.reduce((sum, item) => sum + item.amount, 0);
   const weightedPipeline = openItems.reduce((sum, item) => sum + item.amount * (item.probability / 100), 0);
   const averageProbability = totalPipeline > 0 ? Math.round((weightedPipeline / totalPipeline) * 100) : 0;
@@ -721,6 +722,7 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
     .sort((left, right) => left.time - right.time)[0];
   const grouped = new Map<string, PipelineStatistics["byStage"][number]>();
   const leadSources = new Map<string, { source: string; count: number; total: number }>();
+  const periodValidItems = periodItems.filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost");
 
   openItems.forEach((item) => {
     const current = grouped.get(item.stage) ?? {
@@ -735,7 +737,9 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
     current.total += item.amount;
     current.weightedTotal += item.amount * (item.probability / 100);
     grouped.set(item.stage, current);
+  });
 
+  periodItems.forEach((item) => {
     const sourceKey = item.leadSource?.trim() || "Sem origem";
     const currentSource = leadSources.get(sourceKey) ?? {
       source: sourceKey,
@@ -750,7 +754,7 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
 
   const sourceConversionBuckets = new Map<string, PipelineStatsSourceOpportunity[]>();
 
-  items
+  periodItems
     .filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost")
     .forEach((item) => {
       const sourceKey = item.leadSource?.trim() || "Sem origem";
@@ -760,10 +764,10 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
     });
 
   return {
-    leadsThisMonth: currentMonthItems.length,
-    opportunitiesCount: items.filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost" && stageProgressIndex(item.stage) >= 1).length,
-    proposalsCount: items.filter((item) => mapUiOpportunityStatusToDb(item.status) !== "lost" && stageProgressIndex(item.stage) >= 3).length,
-    salesCount: items.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length,
+    leadsThisMonth: periodItems.length,
+    opportunitiesCount: periodValidItems.filter((item) => stageProgressIndex(item.stage) >= 1).length,
+    proposalsCount: periodValidItems.filter((item) => stageProgressIndex(item.stage) >= 3).length,
+    salesCount: periodItems.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length,
     totalPipeline,
     weightedPipeline,
     averageProbability,
@@ -776,9 +780,9 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
       .sort((left, right) => right.count - left.count || right.total - left.total)
       .map((item) => ({
         ...item,
-        percentage: openItems.length ? Math.round((item.count / openItems.length) * 100) : 0
+        percentage: periodItems.length ? Math.round((item.count / periodItems.length) * 100) : 0
       })),
-    conversions: buildConversionMetrics(items),
+    conversions: buildConversionMetrics(periodItems),
     sourceConversions: Array.from(sourceConversionBuckets.entries())
       .map(([source, bucket]) => ({
         source,
@@ -792,8 +796,8 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[]): Pip
   };
 }
 
-export async function getPipelineStatistics(): Promise<PipelineStatistics> {
-  return getCachedQuery("pipeline:statistics", async () => {
+export async function getPipelineStatistics(periodDays = 30): Promise<PipelineStatistics> {
+  return getCachedQuery(`pipeline:statistics:${periodDays}`, async () => {
     const opportunities = await getOpportunities();
 
     const items = opportunities.map((item) =>
@@ -811,7 +815,7 @@ export async function getPipelineStatistics(): Promise<PipelineStatistics> {
         status: item.status
       })
     );
-    return computePipelineStatistics(items);
+    return computePipelineStatistics(items, periodDays);
   });
 }
 

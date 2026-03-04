@@ -5,6 +5,12 @@ import { CrmShell } from "@/components/crm-shell";
 import { getPipelineStatistics } from "@/lib/crm-data-source";
 import type { PipelineStatistics } from "@/types/crm-app";
 
+const periodOptions = [
+  { id: "30d", label: "30 dias", days: 30 },
+  { id: "6m", label: "6 meses", days: 180 },
+  { id: "12m", label: "12 meses", days: 365 }
+] as const;
+
 const emptyStatistics: PipelineStatistics = {
   leadsThisMonth: 0,
   opportunitiesCount: 0,
@@ -25,12 +31,14 @@ const emptyStatistics: PipelineStatistics = {
 
 export function StatisticsScreen() {
   const [stats, setStats] = useState<PipelineStatistics>(emptyStatistics);
+  const [periodId, setPeriodId] = useState<(typeof periodOptions)[number]["id"]>("30d");
+  const activePeriod = periodOptions.find((item) => item.id === periodId) ?? periodOptions[0];
 
   useEffect(() => {
     let isMounted = true;
 
     async function load() {
-      const next = await getPipelineStatistics();
+      const next = await getPipelineStatistics(activePeriod.days);
 
       if (isMounted) {
         setStats(next);
@@ -42,7 +50,7 @@ export function StatisticsScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [activePeriod.days]);
 
   return (
     <CrmShell
@@ -54,23 +62,52 @@ export function StatisticsScreen() {
       <section style={panelStyle}>
         <div style={sectionHeaderStyle}>
           <div>
-            <div style={eyebrowStyle}>Volume do mes</div>
+            <div style={eyebrowStyle}>Performance no periodo</div>
             <h2 style={titleStyle}>Leads, oportunidades e vendas</h2>
+          </div>
+          <div style={periodFilterRowStyle}>
+            {periodOptions.map((option) => {
+              const isActive = option.id === periodId;
+
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setPeriodId(option.id)}
+                  style={{
+                    ...periodFilterButtonStyle,
+                    background: isActive ? "rgba(79, 70, 229, 0.08)" : "#ffffff",
+                    color: isActive ? "var(--accent)" : "var(--foreground)",
+                    borderColor: isActive ? "rgba(79, 70, 229, 0.18)" : "var(--line)"
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
         </div>
         <div style={kpiGridStyle}>
-          <MetricCard label="Leads do mes" value={String(stats.leadsThisMonth)} detail="Oportunidades criadas no mes atual." />
+          <MetricCard
+            label="Leads do periodo"
+            value={String(stats.leadsThisMonth)}
+            detail={`Oportunidades criadas nos ultimos ${activePeriod.label}.`}
+          />
           <MetricCard
             label="Oportunidades"
             value={String(stats.opportunitiesCount)}
-            detail="Leads que avancaram para contato/qualificacao."
+            detail={`Leads que avancaram para contato/qualificacao em ${activePeriod.label}.`}
           />
           <MetricCard
             label="Propostas"
             value={String(stats.proposalsCount)}
-            detail="Negocios que ja chegaram em proposta enviada."
+            detail={`Negocios que chegaram em proposta enviada em ${activePeriod.label}.`}
           />
-          <MetricCard label="Vendas" value={String(stats.salesCount)} detail="Oportunidades concluidas como ganho." />
+          <MetricCard
+            label="Vendas"
+            value={String(stats.salesCount)}
+            detail={`Oportunidades concluidas como ganho em ${activePeriod.label}.`}
+          />
         </div>
       </section>
 
@@ -156,7 +193,7 @@ export function StatisticsScreen() {
         <div style={sectionHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Conversao do funil</div>
-            <h2 style={titleStyle}>Taxa de avanco entre etapas</h2>
+            <h2 style={titleStyle}>Taxa de avanco entre etapas em {activePeriod.label}</h2>
           </div>
         </div>
         <div style={conversionGridStyle}>
@@ -171,8 +208,8 @@ export function StatisticsScreen() {
           ))}
         </div>
         <div style={conversionFootnoteStyle}>
-          Analise baseada no estagio atual das oportunidades. Para taxa por coorte, o CRM precisaria registrar o historico de passagem por
-          etapa com janela de tempo.
+          A conversao do periodo usa as oportunidades criadas na janela selecionada e o estagio atual de cada uma. Para taxa por coorte
+          completa, o CRM precisaria registrar o historico de passagem por etapa.
         </div>
       </section>
 
@@ -206,7 +243,7 @@ export function StatisticsScreen() {
         <div style={sectionHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Origem dos leads</div>
-            <h2 style={titleStyle}>Canais que abastecem o pipeline</h2>
+            <h2 style={titleStyle}>Canais que geraram leads em {activePeriod.label}</h2>
           </div>
         </div>
         <div style={sourceGridStyle}>
@@ -222,7 +259,7 @@ export function StatisticsScreen() {
               </article>
             ))
           ) : (
-            <div style={emptyStageStyle}>Ainda nao ha origem de leads cadastrada nas oportunidades abertas.</div>
+            <div style={emptyStageStyle}>Ainda nao ha origem de leads cadastrada no periodo selecionado.</div>
           )}
         </div>
       </section>
@@ -231,7 +268,7 @@ export function StatisticsScreen() {
         <div style={sectionHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Conversao por origem</div>
-            <h2 style={titleStyle}>Qualidade de cada canal</h2>
+            <h2 style={titleStyle}>Qualidade de cada canal em {activePeriod.label}</h2>
           </div>
         </div>
         <div style={sourceConversionGridStyle}>
@@ -345,6 +382,23 @@ const summaryBadgeStyle: React.CSSProperties = {
   color: "var(--accent)",
   fontSize: 12,
   fontWeight: 800
+};
+
+const periodFilterRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap"
+};
+
+const periodFilterButtonStyle: React.CSSProperties = {
+  minHeight: 38,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "8px 12px",
+  background: "#ffffff",
+  fontSize: 12,
+  fontWeight: 800,
+  cursor: "pointer"
 };
 
 const kpiGridStyle: React.CSSProperties = {

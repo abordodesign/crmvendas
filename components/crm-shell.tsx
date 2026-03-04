@@ -599,19 +599,24 @@ export function CrmShell({
 
 export const pillStyle: React.CSSProperties = {
   padding: "10px 14px",
+  minHeight: 42,
   borderRadius: 14,
   background: "var(--surface-elevated)",
   border: "1px solid var(--line)",
   color: "var(--muted)",
   fontSize: 13,
-  fontWeight: 700
+  fontWeight: 700,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  boxSizing: "border-box"
 };
 
 export const primaryPillStyle: React.CSSProperties = {
   ...pillStyle,
   background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)",
   color: "#ffffff",
-  border: "none"
+  border: "1px solid transparent"
 };
 
 const notificationButtonStyle: React.CSSProperties = {
