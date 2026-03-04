@@ -596,7 +596,11 @@ function formatDate(date: string | null | undefined) {
     return date;
   }
 
-  return parsed.toLocaleDateString("pt-BR");
+  const preferences = getDateTimePreferences();
+
+  return parsed.toLocaleDateString(preferences.locale, {
+    timeZone: preferences.timeZone
+  });
 }
 
 function formatDateTime(date: string | null | undefined) {
@@ -610,9 +614,15 @@ function formatDateTime(date: string | null | undefined) {
     return date;
   }
 
-  return `${parsed.toLocaleDateString("pt-BR")} ${parsed.toLocaleTimeString("pt-BR", {
+  const preferences = getDateTimePreferences();
+
+  return `${parsed.toLocaleDateString(preferences.locale, {
+    timeZone: preferences.timeZone
+  })} ${parsed.toLocaleTimeString(preferences.locale, {
+    timeZone: preferences.timeZone,
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    hour12: !preferences.use24HourClock
   })}`;
 }
 
@@ -627,7 +637,16 @@ function toDateInput(date: string | null | undefined) {
     return "";
   }
 
-  return parsed.toISOString().slice(0, 10);
+  const preferences = getDateTimePreferences();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: preferences.timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(parsed);
+  const values = Object.fromEntries(parts.filter((item) => item.type !== "literal").map((item) => [item.type, item.value]));
+
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function toTimeInput(date: string | null | undefined) {
@@ -641,11 +660,16 @@ function toTimeInput(date: string | null | undefined) {
     return "";
   }
 
-  return parsed.toLocaleTimeString("pt-BR", {
+  const preferences = getDateTimePreferences();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: preferences.timeZone,
     hour: "2-digit",
     minute: "2-digit",
     hour12: false
-  });
+  }).formatToParts(parsed);
+  const values = Object.fromEntries(parts.filter((item) => item.type !== "literal").map((item) => [item.type, item.value]));
+
+  return `${values.hour}:${values.minute}`;
 }
 
 function combineDateAndTime(date: string | undefined, time: string | undefined) {
@@ -654,7 +678,13 @@ function combineDateAndTime(date: string | undefined, time: string | undefined) 
   }
 
   const normalizedTime = time || "09:00";
-  return `${date}T${normalizedTime}:00`;
+  const parsed = new Date(`${date}T${normalizedTime}:00`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return `${date}T${normalizedTime}:00`;
+  }
+
+  return parsed.toISOString();
 }
 
 function formatTime(date: string | null | undefined) {
@@ -668,10 +698,26 @@ function formatTime(date: string | null | undefined) {
     return "--:--";
   }
 
-  return parsed.toLocaleTimeString("pt-BR", {
+  const preferences = getDateTimePreferences();
+
+  return parsed.toLocaleTimeString(preferences.locale, {
+    timeZone: preferences.timeZone,
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    hour12: !preferences.use24HourClock
   });
+}
+
+function getDateTimePreferences() {
+  const settings = peekCrmSettings();
+  const browserTimeZone =
+    typeof Intl !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo" : "America/Sao_Paulo";
+
+  return {
+    locale: settings.locale,
+    timeZone: settings.timeZone === "system" ? browserTimeZone : settings.timeZone,
+    use24HourClock: settings.use24HourClock
+  };
 }
 
 function formatRelative(date: string | null | undefined) {

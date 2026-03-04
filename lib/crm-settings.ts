@@ -10,9 +10,15 @@ export type FeatureKey =
   | "pipeline_drag_drop"
   | "history_module";
 
+export type SupportedLocale = "pt-BR" | "en-US" | "es-ES";
+export type SupportedTimeZone = "system" | "America/Sao_Paulo" | "America/New_York" | "UTC";
+
 export type CrmSettings = {
   displayName: string;
   companyName: string;
+  locale: SupportedLocale;
+  timeZone: SupportedTimeZone;
+  use24HourClock: boolean;
   features: Record<FeatureKey, boolean>;
 };
 
@@ -23,6 +29,9 @@ const SETTINGS_CACHE_TTL_MS = 5000;
 export const defaultCrmSettings: CrmSettings = {
   displayName: "Administrador CRM",
   companyName: "CRM comercial",
+  locale: "pt-BR",
+  timeZone: "system",
+  use24HourClock: true,
   features: {
     notifications_center: true,
     browser_notifications: true,
@@ -69,6 +78,19 @@ function getLocalSettings() {
     return {
       displayName: parsed.displayName || defaultCrmSettings.displayName,
       companyName: parsed.companyName || defaultCrmSettings.companyName,
+      locale:
+        parsed.locale === "pt-BR" || parsed.locale === "en-US" || parsed.locale === "es-ES"
+          ? parsed.locale
+          : defaultCrmSettings.locale,
+      timeZone:
+        parsed.timeZone === "system" ||
+        parsed.timeZone === "America/Sao_Paulo" ||
+        parsed.timeZone === "America/New_York" ||
+        parsed.timeZone === "UTC"
+          ? parsed.timeZone
+          : defaultCrmSettings.timeZone,
+      use24HourClock:
+        typeof parsed.use24HourClock === "boolean" ? parsed.use24HourClock : defaultCrmSettings.use24HourClock,
       features: {
         ...defaultCrmSettings.features,
         ...(parsed.features || {})
@@ -204,7 +226,7 @@ export async function getCrmSettings(): Promise<CrmSettings> {
 
     const { data, error } = await supabase
       .from("app_settings")
-      .select("display_name, company_name, features")
+      .select("display_name, company_name, locale, time_zone, use_24_hour_clock, features")
       .eq("user_id", context.userId)
       .maybeSingle();
 
@@ -215,6 +237,16 @@ export async function getCrmSettings(): Promise<CrmSettings> {
     const next = {
       displayName: data.display_name || local.displayName,
       companyName: data.company_name || local.companyName,
+      locale:
+        data.locale === "pt-BR" || data.locale === "en-US" || data.locale === "es-ES" ? data.locale : local.locale,
+      timeZone:
+        data.time_zone === "system" ||
+        data.time_zone === "America/Sao_Paulo" ||
+        data.time_zone === "America/New_York" ||
+        data.time_zone === "UTC"
+          ? data.time_zone
+          : local.timeZone,
+      use24HourClock: typeof data.use_24_hour_clock === "boolean" ? data.use_24_hour_clock : local.use24HourClock,
       features: {
         ...defaultCrmSettings.features,
         ...(typeof data.features === "object" && data.features
@@ -261,6 +293,9 @@ export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSetting
       user_id: context.userId,
       display_name: settings.displayName,
       company_name: settings.companyName,
+      locale: settings.locale,
+      time_zone: settings.timeZone,
+      use_24_hour_clock: settings.use24HourClock,
       features: settings.features,
       updated_at: new Date().toISOString()
     },

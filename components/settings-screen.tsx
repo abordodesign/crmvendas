@@ -9,6 +9,8 @@ import {
   saveCrmSettings,
   type CrmSettings,
   type FeatureKey,
+  type SupportedLocale,
+  type SupportedTimeZone,
   updateCrmPassword
 } from "@/lib/crm-settings";
 import { useCrmRole } from "@/lib/use-crm-role";
@@ -48,6 +50,19 @@ const featureDefinitions: Array<{
     title: "Historico e auditoria",
     description: "Mantem o menu Historico e o rastreio de movimentacoes do sistema."
   }
+];
+
+const localeOptions: Array<{ value: SupportedLocale; label: string }> = [
+  { value: "pt-BR", label: "Portugues (Brasil)" },
+  { value: "en-US", label: "English (United States)" },
+  { value: "es-ES", label: "Espanol" }
+];
+
+const timeZoneOptions: Array<{ value: SupportedTimeZone; label: string }> = [
+  { value: "system", label: "Automatico (navegador)" },
+  { value: "America/Sao_Paulo", label: "Brasilia (GMT-3)" },
+  { value: "America/New_York", label: "New York (GMT-5/-4)" },
+  { value: "UTC", label: "UTC" }
 ];
 
 export function SettingsScreen() {
@@ -206,6 +221,7 @@ export function SettingsScreen() {
           <StatCard label="Funcoes ativas" value={`${activeFeatureCount}/${featureDefinitions.length}`} accent="#4f46e5" />
           <StatCard label="Nome exibido" value={draftSettings.displayName} accent="#0f766e" compact />
           <StatCard label="Empresa no CRM" value={draftSettings.companyName} accent="#b45309" compact />
+          <StatCard label="Relogio" value={draftSettings.use24HourClock ? "24h" : "12h"} accent="#0f766e" compact />
         </div>
 
         {feedback ? (
@@ -264,11 +280,65 @@ export function SettingsScreen() {
                 placeholder="Nome principal do CRM"
               />
             </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Localidade</span>
+              <select
+                value={draftSettings.locale}
+                onChange={(event) =>
+                  setDraftSettings((current) => ({
+                    ...current,
+                    locale: event.target.value as SupportedLocale
+                  }))
+                }
+                style={inputStyle}
+              >
+                {localeOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Fuso horario</span>
+              <select
+                value={draftSettings.timeZone}
+                onChange={(event) =>
+                  setDraftSettings((current) => ({
+                    ...current,
+                    timeZone: event.target.value as SupportedTimeZone
+                  }))
+                }
+                style={inputStyle}
+              >
+                {timeZoneOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Formato do relogio</span>
+              <select
+                value={draftSettings.use24HourClock ? "24h" : "12h"}
+                onChange={(event) =>
+                  setDraftSettings((current) => ({
+                    ...current,
+                    use24HourClock: event.target.value === "24h"
+                  }))
+                }
+                style={inputStyle}
+              >
+                <option value="24h">24 horas (padrao premium)</option>
+                <option value="12h">12 horas (AM/PM)</option>
+              </select>
+            </label>
           </div>
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <button type="button" onClick={handleSaveIdentity} style={primaryButtonStyle}>
-              Salvar nome exibido e nome do sistema
+              Salvar identidade e relogio
             </button>
           </div>
         </div>

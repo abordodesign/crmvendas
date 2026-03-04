@@ -142,6 +142,9 @@ create table if not exists public.app_settings (
   user_id uuid not null references public.profiles(id) on delete cascade unique,
   display_name text,
   company_name text,
+  locale text not null default 'pt-BR',
+  time_zone text not null default 'system',
+  use_24_hour_clock boolean not null default true,
   features jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
