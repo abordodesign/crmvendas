@@ -9,6 +9,7 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -116,14 +117,25 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
 
         <label style={{ display: "grid", gap: 8 }}>
           <span style={{ fontSize: 13, fontWeight: 800, color: "var(--muted)" }}>Senha</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Digite sua senha"
-            required
-            style={inputStyle}
-          />
+          <div style={passwordFieldStyle}>
+            <input
+              type={isPasswordVisible ? "text" : "password"}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Digite sua senha"
+              required
+              style={passwordInputStyle}
+            />
+            <button
+              type="button"
+              onClick={() => setIsPasswordVisible((current) => !current)}
+              aria-label={isPasswordVisible ? "Ocultar senha" : "Mostrar senha"}
+              aria-pressed={isPasswordVisible}
+              style={passwordToggleButtonStyle}
+            >
+              <EyeIcon isVisible={isPasswordVisible} />
+            </button>
+          </div>
         </label>
 
         {error ? (
@@ -195,3 +207,78 @@ const inputStyle: React.CSSProperties = {
   color: "var(--foreground)",
   boxShadow: "inset 0 1px 2px rgba(15, 23, 42, 0.02)"
 };
+
+const passwordFieldStyle: React.CSSProperties = {
+  position: "relative"
+};
+
+const passwordInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  paddingRight: 58
+};
+
+const passwordToggleButtonStyle: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  right: 12,
+  transform: "translateY(-50%)",
+  width: 36,
+  height: 36,
+  borderRadius: 12,
+  border: 0,
+  background: "transparent",
+  color: "var(--muted)",
+  display: "grid",
+  placeItems: "center",
+  cursor: "pointer"
+};
+
+function EyeIcon({ isVisible }: { isVisible: boolean }) {
+  if (isVisible) {
+    return (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M3 3l18 18"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M10.58 10.58A2 2 0 0 0 12 14a2 2 0 0 0 1.42-.58"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M9.88 5.09A10.94 10.94 0 0 1 12 4.91c5.05 0 9.27 3.11 10.5 7.09a11.8 11.8 0 0 1-3.34 5.01"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M6.61 6.62A11.82 11.82 0 0 0 1.5 12c1.23 3.98 5.45 7.09 10.5 7.09 1.66 0 3.24-.34 4.68-.94"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M1.5 12C2.73 8.02 6.95 4.91 12 4.91S21.27 8.02 22.5 12c-1.23 3.98-5.45 7.09-10.5 7.09S2.73 15.98 1.5 12Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="2.5" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
