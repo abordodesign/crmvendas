@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { CustomerFormModal } from "@/components/customer-form-modal";
 import { CrmShell, pillStyle } from "@/components/crm-shell";
-import { createCustomer, deleteCustomer, getCustomers, updateCustomer } from "@/lib/crm-data-source";
+import { createCustomer, deleteCustomer, getCustomers, getOpportunities, getTasks, updateCustomer } from "@/lib/crm-data-source";
 import { hasPermission } from "@/lib/access-control";
 import { seedCustomers } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
-import type { CustomerItem } from "@/types/crm-app";
+import type { CustomerItem, OpportunityItem, TaskItem } from "@/types/crm-app";
 
 function upsertCustomer(items: CustomerItem[], nextItem: CustomerItem) {
   return [nextItem, ...items.filter((item) => item.id !== nextItem.id)];
@@ -16,6 +16,8 @@ function upsertCustomer(items: CustomerItem[], nextItem: CustomerItem) {
 export function CustomersScreen() {
   const role = useCrmRole();
   const [customers, setCustomers] = useState<CustomerItem[]>(seedCustomers);
+  const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [legalName, setLegalName] = useState("");
   const [tradeName, setTradeName] = useState("");
   const [segment, setSegment] = useState("");
@@ -32,6 +34,13 @@ export function CustomersScreen() {
   const [customerPendingDelete, setCustomerPendingDelete] = useState<CustomerItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [segmentFilter, setSegmentFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [cityFilter, setCityFilter] = useState("all");
+  const [opportunityFilter, setOpportunityFilter] = useState("all");
+  const [taskRecencyFilter, setTaskRecencyFilter] = useState("all");
   const [isPending, startTransition] = useTransition();
   const canManageCustomers = role ? hasPermission(role, "accounts:write") : false;
 
@@ -39,10 +48,16 @@ export function CustomersScreen() {
     let isMounted = true;
 
     async function load() {
-      const nextCustomers = await getCustomers();
+      const [nextCustomers, nextOpportunities, nextTasks] = await Promise.all([
+        getCustomers(),
+        getOpportunities(),
+        getTasks()
+      ]);
 
       if (isMounted) {
         setCustomers(nextCustomers);
+        setOpportunities(nextOpportunities);
+        setTasks(nextTasks);
       }
     }
 
@@ -233,6 +248,125 @@ export function CustomersScreen() {
     });
   }
 
+  const segmentOptions = useMemo(
+    () =>
+      Array.from(new Set(customers.map((item) => item.segment.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [customers]
+  );
+  const ownerOptions = useMemo(
+    () => Array.from(new Set(customers.map((item) => item.owner.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [customers]
+  );
+  const statusOptions = useMemo(
+    () => Array.from(new Set(customers.map((item) => item.status.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [customers]
+  );
+  const cityOptions = useMemo(
+    () => Array.from(new Set(customers.map((item) => item.city.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [customers]
+  );
+
+  const filteredCustomers = useMemo(() => {
+    const normalizedSearch = normalizeSearch(searchTerm);
+    const now = new Date();
+    const recencyDays =
+      taskRecencyFilter === "all"
+        ? null
+        : Number(taskRecencyFilter.split("_")[1] || 0);
+
+    function hasActiveOpportunity(customer: CustomerItem) {
+      const customerNames = [customer.tradeName, customer.legalName].map(normalizeSearch).filter(Boolean);
+
+      return opportunities.some((opportunity) => {
+        const company = normalizeSearch(opportunity.company);
+        const isMatch = customerNames.some((name) => name && (company === name || company.includes(name) || name.includes(company)));
+        const isActive = opportunity.status !== "Conquistado" && opportunity.status !== "Perdido";
+        return isMatch && isActive;
+      });
+    }
+
+    function hasRecentTask(customer: CustomerItem, days: number) {
+      const customerNames = [customer.tradeName, customer.legalName].map(normalizeSearch).filter(Boolean);
+      const since = new Date(now.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+
+      return tasks.some((task) => {
+        const company = normalizeSearch(task.company);
+        const isMatch = customerNames.some((name) => name && (company === name || company.includes(name) || name.includes(company)));
+
+        if (!isMatch) {
+          return false;
+        }
+
+        const date = parseTaskDate(task);
+
+        if (!date) {
+          return false;
+        }
+
+        return date.getTime() >= since.getTime() && date.getTime() <= now.getTime();
+      });
+    }
+
+    return customers.filter((customer) => {
+      if (segmentFilter !== "all" && customer.segment !== segmentFilter) {
+        return false;
+      }
+
+      if (ownerFilter !== "all" && customer.owner !== ownerFilter) {
+        return false;
+      }
+
+      if (statusFilter !== "all" && customer.status !== statusFilter) {
+        return false;
+      }
+
+      if (cityFilter !== "all" && customer.city !== cityFilter) {
+        return false;
+      }
+
+      if (opportunityFilter === "with_active" && !hasActiveOpportunity(customer)) {
+        return false;
+      }
+
+      if (opportunityFilter === "without_active" && hasActiveOpportunity(customer)) {
+        return false;
+      }
+
+      if (recencyDays) {
+        const hasTask = hasRecentTask(customer, recencyDays);
+
+        if (taskRecencyFilter.startsWith("without_") && hasTask) {
+          return false;
+        }
+
+        if (taskRecencyFilter.startsWith("with_") && !hasTask) {
+          return false;
+        }
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      const haystack = normalizeSearch(
+        [
+          customer.tradeName,
+          customer.legalName,
+          customer.segment,
+          customer.companyContactName,
+          customer.owner,
+          customer.city,
+          customer.state,
+          customer.document,
+          customer.email,
+          customer.phone
+        ].join(" ")
+      );
+
+      return haystack.includes(normalizedSearch);
+    });
+  }, [customers, opportunities, tasks, searchTerm, segmentFilter, ownerFilter, statusFilter, cityFilter, opportunityFilter, taskRecencyFilter]);
+
   return (
     <CrmShell
       activePath="/dashboard/customers"
@@ -342,18 +476,108 @@ export function CustomersScreen() {
             marginBottom: 16
           }}
         >
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <div style={pillStyle}>Buscar cliente</div>
-            <div style={pillStyle}>Segmento</div>
-            <div style={pillStyle}>Responsavel</div>
+          <div style={{ display: "grid", gap: 10, width: "100%" }}>
+            <div style={filterGridStyle}>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Buscar cliente</span>
+                <input
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                  placeholder="Nome, documento, e-mail, telefone..."
+                  style={filterInputStyle}
+                />
+              </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Segmento</span>
+                <select value={segmentFilter} onChange={(event) => setSegmentFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todos</option>
+                  {segmentOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Responsavel</span>
+                <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todos</option>
+                  {ownerOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Status</span>
+                <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todos</option>
+                  {statusOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Cidade</span>
+                <select value={cityFilter} onChange={(event) => setCityFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todas</option>
+                  {cityOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Oportunidade ativa</span>
+                <select value={opportunityFilter} onChange={(event) => setOpportunityFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todos</option>
+                  <option value="with_active">Com oportunidade ativa</option>
+                  <option value="without_active">Sem oportunidade ativa</option>
+                </select>
+              </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Tarefa recente</span>
+                <select value={taskRecencyFilter} onChange={(event) => setTaskRecencyFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todas</option>
+                  <option value="without_7">Sem tarefa nos ultimos 7 dias</option>
+                  <option value="without_15">Sem tarefa nos ultimos 15 dias</option>
+                  <option value="without_30">Sem tarefa nos ultimos 30 dias</option>
+                  <option value="with_7">Com tarefa nos ultimos 7 dias</option>
+                  <option value="with_15">Com tarefa nos ultimos 15 dias</option>
+                  <option value="with_30">Com tarefa nos ultimos 30 dias</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={pillStyle}>Filtros ativos para carteira</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm("");
+                  setSegmentFilter("all");
+                  setOwnerFilter("all");
+                  setStatusFilter("all");
+                  setCityFilter("all");
+                  setOpportunityFilter("all");
+                  setTaskRecencyFilter("all");
+                }}
+                style={resetFiltersButtonStyle}
+              >
+                Limpar filtros
+              </button>
+            </div>
           </div>
           <div style={{ color: "var(--muted)", fontSize: 13, fontWeight: 700 }}>
-            {customers.length} contas carregadas
+            {filteredCustomers.length} de {customers.length} contas
           </div>
         </div>
 
         <div style={{ display: "grid", gap: 12 }}>
-          {customers.map((customer) => (
+          {filteredCustomers.map((customer) => (
             <article
               key={customer.id}
               style={{
@@ -471,6 +695,11 @@ export function CustomersScreen() {
               </div>
             </article>
           ))}
+          {!filteredCustomers.length ? (
+            <div style={emptyFiltersStyle}>
+              Nenhum cliente encontrado com os filtros atuais. Ajuste os campos ou limpe os filtros para visualizar toda a base.
+            </div>
+          ) : null}
         </div>
       </section>
     </CrmShell>
@@ -548,6 +777,39 @@ function WhatsAppButton({ phone }: { phone: string }) {
   );
 }
 
+function normalizeSearch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function parseTaskDate(task: TaskItem) {
+  if (task.dueDate) {
+    const parsed = new Date(`${task.dueDate}T12:00:00`);
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed;
+    }
+  }
+
+  if (task.due) {
+    const match = task.due.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+
+    if (match) {
+      const [, day, month, year] = match;
+      const parsed = new Date(`${year}-${month}-${day}T12:00:00`);
+
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
 function DataCell({
   label,
   value,
@@ -610,6 +872,56 @@ const warningStyle: React.CSSProperties = {
   color: "#a16207",
   fontSize: 13,
   fontWeight: 700
+};
+
+const filterGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gap: 10
+};
+
+const filterFieldStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  minWidth: 0
+};
+
+const filterLabelStyle: React.CSSProperties = {
+  color: "var(--muted)",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
+};
+
+const filterInputStyle: React.CSSProperties = {
+  minHeight: 40,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "9px 12px",
+  outline: "none",
+  font: "inherit",
+  background: "#ffffff",
+  width: "100%",
+  boxSizing: "border-box"
+};
+
+const resetFiltersButtonStyle: React.CSSProperties = {
+  minHeight: 40,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "9px 12px",
+  background: "#ffffff",
+  fontWeight: 800,
+  cursor: "pointer"
+};
+
+const emptyFiltersStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  borderRadius: 16,
+  border: "1px dashed var(--line)",
+  color: "var(--muted)",
+  fontSize: 13
 };
 
 const editButtonStyle: React.CSSProperties = {

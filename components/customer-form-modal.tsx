@@ -1,4 +1,5 @@
 "use client";
+import { useEffect, useState } from "react";
 
 type CustomerFormValues = {
   legalName: string;
@@ -33,8 +34,72 @@ export function CustomerFormModal({
   onSubmit: () => void;
   isPending: boolean;
 }) {
+  const [isLookupPending, setIsLookupPending] = useState(false);
+  const [lookupFeedback, setLookupFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setLookupFeedback(null);
+      setIsLookupPending(false);
+    }
+  }, [open]);
+
   if (!open) {
     return null;
+  }
+
+  async function handleLookupCnpj() {
+    const digits = values.document.replace(/\D/g, "");
+
+    if (digits.length !== 14) {
+      setLookupFeedback("Informe um CNPJ valido com 14 digitos.");
+      return;
+    }
+
+    setIsLookupPending(true);
+    setLookupFeedback(null);
+
+    try {
+      const response = await fetch(`/api/cnpj/${digits}`, {
+        method: "GET",
+        cache: "no-store"
+      });
+
+      const payload = (await response.json()) as Partial<CustomerFormValues> & { error?: string };
+
+      if (!response.ok) {
+        setLookupFeedback(payload.error ?? "Nao foi possivel consultar este CNPJ.");
+        return;
+      }
+
+      const fields: Array<keyof CustomerFormValues> = [
+        "document",
+        "legalName",
+        "tradeName",
+        "segment",
+        "companyContactName",
+        "phone",
+        "email",
+        "address",
+        "city",
+        "state",
+        "zipCode"
+      ];
+
+      fields.forEach((field) => {
+        const value = payload[field];
+
+        if (typeof value === "string" && value.trim()) {
+          onChange(field, value.trim());
+        }
+      });
+
+      setLookupFeedback("Dados do CNPJ carregados. Revise antes de salvar.");
+    } catch {
+      setLookupFeedback("Falha ao consultar CNPJ. Tente novamente.");
+    } finally {
+      setIsLookupPending(false);
+    }
   }
 
   return (
@@ -83,8 +148,32 @@ export function CustomerFormModal({
               <Field label="Cidade" value={values.city} onChange={(value) => onChange("city", value)} />
               <Field label="Estado" value={values.state} onChange={(value) => onChange("state", value)} placeholder="SP" />
               <Field label="CEP" value={values.zipCode} onChange={(value) => onChange("zipCode", value)} />
-              <Field label="CNPJ ou CPF" value={values.document} onChange={(value) => onChange("document", value)} />
+              <label style={{ display: "grid", gap: 8, minWidth: 0, width: "100%" }}>
+                <span
+                  style={{
+                    color: "var(--muted)",
+                    fontSize: 10,
+                    fontWeight: 800,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase"
+                  }}
+                >
+                  CNPJ ou CPF
+                </span>
+                <div style={documentRowStyle}>
+                  <input
+                    value={values.document}
+                    onChange={(event) => onChange("document", event.target.value)}
+                    placeholder="00.000.000/0000-00"
+                    style={inputStyle}
+                  />
+                  <button type="button" onClick={handleLookupCnpj} disabled={isLookupPending} style={lookupButtonStyle}>
+                    {isLookupPending ? "Buscando..." : "Buscar CNPJ"}
+                  </button>
+                </div>
+              </label>
             </div>
+            {lookupFeedback ? <div style={lookupFeedbackStyle}>{lookupFeedback}</div> : null}
           </div>
 
           <div style={sidePanelStyle}>
@@ -369,4 +458,29 @@ const fieldGridCompactStyle: React.CSSProperties = {
   gap: 14,
   alignItems: "end",
   minWidth: 0
+};
+
+const documentRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto",
+  gap: 10,
+  alignItems: "center"
+};
+
+const lookupButtonStyle: React.CSSProperties = {
+  minHeight: 44,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  background: "#ffffff",
+  padding: "0 12px",
+  fontWeight: 800,
+  cursor: "pointer",
+  whiteSpace: "nowrap"
+};
+
+const lookupFeedbackStyle: React.CSSProperties = {
+  marginTop: 10,
+  color: "var(--muted)",
+  fontSize: 12,
+  fontWeight: 700
 };
