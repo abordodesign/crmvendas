@@ -2894,6 +2894,8 @@ export async function createTask(input: {
     opportunityId: input.opportunityId
   });
 
+  notifyCrmDataChanged();
+
   return createdTask;
 }
 
@@ -2904,7 +2906,7 @@ export async function updateTask(input: {
   dueTime?: string;
   priority: string;
   companyLabel?: string;
-}): Promise<TaskItem> {
+}): Promise<{ ok: boolean; item: TaskItem; message?: string }> {
   const dueAt = combineDateAndTime(input.dueDate, input.dueTime) ?? undefined;
   const fallbackItem: TaskItem = {
     id: input.id,
@@ -2926,7 +2928,7 @@ export async function updateTask(input: {
       kind: "task",
       forceLocal: true
     });
-    return fallbackItem;
+    return { ok: true, item: fallbackItem };
   }
 
   const { data, error } = await supabase
@@ -2938,10 +2940,14 @@ export async function updateTask(input: {
     })
     .eq("id", input.id)
     .select("id, title, due_at, priority")
-    .single();
+    .maybeSingle();
 
   if (error || !data) {
-    return fallbackItem;
+    return {
+      ok: false,
+      item: fallbackItem,
+      message: "Nao foi possivel atualizar a tarefa."
+    };
   }
 
   const updatedTask = {
@@ -2965,7 +2971,9 @@ export async function updateTask(input: {
     forceLocal: !context
   });
 
-  return updatedTask;
+  notifyCrmDataChanged();
+
+  return { ok: true, item: updatedTask };
 }
 
 export async function completeTask(taskId: string, taskTitle?: string): Promise<boolean> {
@@ -2995,6 +3003,8 @@ export async function completeTask(taskId: string, taskTitle?: string): Promise<
       kind: "task",
       forceLocal: !context
     });
+
+    notifyCrmDataChanged();
   }
 
   return !error;
@@ -3030,6 +3040,8 @@ export async function deleteTask(input: { id: string; title: string }): Promise<
     kind: "task",
     forceLocal: !context
   });
+
+  notifyCrmDataChanged();
 
   return true;
 }

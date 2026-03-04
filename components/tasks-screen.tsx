@@ -109,7 +109,7 @@ export function TasksScreen() {
 
       startTransition(() => {
         void (async () => {
-          const updated = await updateTask({
+          const result = await updateTask({
             id: editingId,
             title,
             dueDate,
@@ -118,12 +118,17 @@ export function TasksScreen() {
             companyLabel: currentRecord.company
           });
 
+          if (!result.ok) {
+            setFeedback(result.message ?? "Nao foi possivel atualizar a tarefa.");
+            return;
+          }
+
           setTasks((current) =>
             current.map((item) =>
               item.id === editingId
                 ? {
                     ...item,
-                    ...updated
+                    ...result.item
                   }
                 : item
             )
