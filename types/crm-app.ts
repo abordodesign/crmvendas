@@ -106,6 +106,14 @@ export type OpportunityItem = {
   concludedAt?: string;
 };
 
+export type OpportunityNote = {
+  id: string;
+  opportunityId: string;
+  content: string;
+  author: string;
+  createdAt: string;
+};
+
 export type DashboardData = {
   kpis: KpiCard[];
   pipeline: PipelineColumn[];

@@ -10,10 +10,12 @@ import {
   CONCLUSION_STATUS_OPTIONS,
   DEFAULT_STAGE_OPTIONS,
   LEAD_SOURCE_OPTIONS,
+  addOpportunityNote,
   createCustomer,
   deleteOpportunity,
   createOpportunity,
   getOpportunities,
+  getOpportunityNotes,
   getPipelineStatistics,
   getReferenceOptions,
   isConclusionStage,
@@ -23,7 +25,7 @@ import {
 } from "@/lib/crm-data-source";
 import { seedOpportunities } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
-import type { OpportunityItem } from "@/types/crm-app";
+import type { OpportunityItem, OpportunityNote } from "@/types/crm-app";
 
 const NEW_ACCOUNT_OPTION = "__new__";
 const STAGE_FLOW = ["Lead", "Qualificacao", "Diagnostico", "Proposta enviada", "Negociacao", "Fechamento"];
@@ -77,6 +79,9 @@ export function OpportunitiesScreen() {
   const [nearestOpenCloseDate, setNearestOpenCloseDate] = useState<string | null>(null);
   const [averageProbability, setAverageProbability] = useState(0);
   const [forecastMonth, setForecastMonth] = useState(0);
+  const [opportunityNotes, setOpportunityNotes] = useState<OpportunityNote[]>([]);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteFeedback, setNoteFeedback] = useState<string | null>(null);
   const isDragDropEnabled = settings.features.pipeline_drag_drop;
 
   useEffect(() => {
@@ -102,6 +107,7 @@ export function OpportunitiesScreen() {
   }, []);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [isNotePending, startNoteTransition] = useTransition();
 
   const canCreate = role ? hasPermission(role, "opportunities:write") : true;
   const canEdit = role
@@ -224,6 +230,31 @@ export function OpportunitiesScreen() {
     };
   }, [recentlyMovedOpportunityId]);
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadNotes() {
+      if (!isFormModalOpen || !editingId) {
+        if (isMounted) {
+          setOpportunityNotes([]);
+        }
+        return;
+      }
+
+      const nextNotes = await getOpportunityNotes(editingId);
+
+      if (isMounted) {
+        setOpportunityNotes(nextNotes);
+      }
+    }
+
+    void loadNotes();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [editingId, isFormModalOpen]);
+
   function resetForm() {
     setEditingId(null);
     setService("");
@@ -251,6 +282,9 @@ export function OpportunitiesScreen() {
     setNewCustomerDocument("");
     setAccountSearch("");
     setIsAccountMenuOpen(false);
+    setOpportunityNotes([]);
+    setNoteDraft("");
+    setNoteFeedback(null);
   }
 
   function openCreateModal() {
@@ -609,6 +643,34 @@ export function OpportunitiesScreen() {
     });
   }
 
+  function handleSaveNote() {
+    if (!editingId || !noteDraft.trim() || isNotePending) {
+      return;
+    }
+
+    const currentOpportunity = opportunities.find((item) => item.id === editingId);
+
+    if (!currentOpportunity) {
+      return;
+    }
+
+    setNoteFeedback(null);
+
+    startNoteTransition(() => {
+      void (async () => {
+        const saved = await addOpportunityNote({
+          opportunityId: currentOpportunity.id,
+          opportunityTitle: currentOpportunity.title,
+          content: noteDraft
+        });
+
+        setOpportunityNotes((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+        setNoteDraft("");
+        setNoteFeedback("Nota salva.");
+      })();
+    });
+  }
+
   function handleStageDrop(targetStage: string) {
     if (!draggedOpportunityId) {
       return;
@@ -720,6 +782,12 @@ export function OpportunitiesScreen() {
         onEnableEdit={() => setIsViewMode(false)}
         onStartConclusion={startConclusion}
         onConclude={handleConcludeNow}
+        notes={opportunityNotes}
+        noteDraft={noteDraft}
+        onNoteDraftChange={setNoteDraft}
+        onSaveNote={handleSaveNote}
+        noteFeedback={noteFeedback}
+        isNotePending={isNotePending}
         onClose={() => {
           setIsViewMode(false);
           setIsFormModalOpen(false);
@@ -1444,6 +1512,12 @@ function OpportunityFormModal({
   onEnableEdit,
   onStartConclusion,
   onConclude,
+  notes,
+  noteDraft,
+  onNoteDraftChange,
+  onSaveNote,
+  noteFeedback,
+  isNotePending,
   onClose,
   onSubmit,
   isPending,
@@ -1493,6 +1567,12 @@ function OpportunityFormModal({
   onEnableEdit: () => void;
   onStartConclusion: () => void;
   onConclude: () => void;
+  notes: OpportunityNote[];
+  noteDraft: string;
+  onNoteDraftChange: (value: string) => void;
+  onSaveNote: () => void;
+  noteFeedback: string | null;
+  isNotePending: boolean;
   onClose: () => void;
   onSubmit: () => void;
   isPending: boolean;
@@ -1778,6 +1858,62 @@ function OpportunityFormModal({
                 Valor ponderado: {formatCurrency(calculatedTicket * (effectiveProbability / 100))}.
               </div>
             </div>
+
+            {editing ? (
+              <div
+                style={{
+                  padding: 18,
+                  borderRadius: 20,
+                  background: "#ffffff",
+                  border: "1px solid var(--line)"
+                }}
+              >
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--muted)" }}>
+                  📝 Notas da negociacao
+                </div>
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  <textarea
+                    value={noteDraft}
+                    onChange={(event) => onNoteDraftChange(event.target.value)}
+                    placeholder="Registrar contexto, pendencias ou combinados desta oportunidade."
+                    disabled={viewMode && !editing}
+                    style={noteTextareaStyle}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+                    <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                      As notas ficam salvas dentro do CRM e acompanham a oportunidade.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onSaveNote}
+                      disabled={!noteDraft.trim() || isNotePending}
+                      style={saveNoteButtonStyle}
+                    >
+                      {isNotePending ? "Salvando..." : "Salvar nota"}
+                    </button>
+                  </div>
+                  {noteFeedback ? <div style={noteFeedbackStyle}>{noteFeedback}</div> : null}
+                </div>
+
+                <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+                  {notes.length ? (
+                    notes.map((note) => (
+                      <article key={note.id} style={noteCardStyle}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                          <div style={{ fontSize: 12, fontWeight: 800 }}>{note.author}</div>
+                          <div style={{ color: "var(--muted)", fontSize: 12 }}>{formatNoteDate(note.createdAt)}</div>
+                        </div>
+                        <div style={{ marginTop: 8, color: "var(--foreground)", fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                          {note.content}
+                        </div>
+                      </article>
+                    ))
+                  ) : (
+                    <div style={emptyNotesStyle}>Nenhuma nota registrada para esta oportunidade.</div>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -2224,6 +2360,50 @@ const accountCreateStyle: React.CSSProperties = {
   fontWeight: 800
 };
 
+const noteTextareaStyle: React.CSSProperties = {
+  minHeight: 108,
+  borderRadius: 14,
+  border: "1px solid var(--line)",
+  padding: "12px 14px",
+  outline: "none",
+  font: "inherit",
+  resize: "vertical",
+  width: "100%",
+  boxSizing: "border-box"
+};
+
+const saveNoteButtonStyle: React.CSSProperties = {
+  minHeight: 40,
+  border: 0,
+  borderRadius: 12,
+  padding: "10px 14px",
+  background: "rgba(79, 70, 229, 0.1)",
+  color: "var(--accent)",
+  fontWeight: 800,
+  cursor: "pointer"
+};
+
+const noteFeedbackStyle: React.CSSProperties = {
+  color: "var(--secondary)",
+  fontSize: 12,
+  fontWeight: 700
+};
+
+const noteCardStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 16,
+  background: "var(--surface-elevated)",
+  border: "1px solid var(--line)"
+};
+
+const emptyNotesStyle: React.CSSProperties = {
+  padding: "12px 14px",
+  borderRadius: 16,
+  border: "1px dashed var(--line)",
+  color: "var(--muted)",
+  fontSize: 13
+};
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -2258,6 +2438,22 @@ function leadSourceIdFromLabel(value: string | undefined) {
 
   const match = LEAD_SOURCE_OPTIONS.find((item) => item.label.toLowerCase() === value.trim().toLowerCase());
   return match?.id ?? LEAD_SOURCE_OPTIONS[0]?.id ?? "";
+}
+
+function formatNoteDate(value: string) {
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Agora";
+  }
+
+  return parsed.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {

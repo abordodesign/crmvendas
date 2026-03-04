@@ -18,6 +18,7 @@ import type {
   NotificationItem,
   NotificationPriority,
   OpportunityItem,
+  OpportunityNote,
   PipelineStatistics,
   PipelineColumn,
   TaskItem
@@ -62,6 +63,7 @@ type CurrentUserContext = {
 };
 
 const LOCAL_OPPORTUNITIES_KEY = "crm_local_opportunity_previews";
+const LOCAL_OPPORTUNITY_NOTES_KEY = "crm_local_opportunity_notes";
 const LOCAL_CUSTOMERS_KEY = "crm_local_customers";
 const LOCAL_ACTIVITY_KEY = "crm_local_activity";
 const LOCAL_AGENDA_KEY = "crm_local_agenda";
@@ -69,6 +71,7 @@ const LOCAL_NOTIFICATIONS_KEY = "crm_local_notifications";
 const CRM_DATA_CHANGED_EVENT = "crm:data-changed";
 const STAGE_NOTE_PREFIX = "stage_move:";
 const AUDIT_NOTE_PREFIX = "audit:";
+const OPPORTUNITY_NOTE_PREFIX = "opportunity_note:";
 const USER_CONTEXT_CACHE_TTL_MS = 5000;
 const QUERY_CACHE_TTL_MS = 4000;
 const DASHBOARD_PIPELINE_LIMIT = 120;
@@ -229,6 +232,25 @@ function getLocalCustomers(): CustomerItem[] {
   }
 }
 
+function getLocalOpportunityNotes(): OpportunityNote[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_OPPORTUNITY_NOTES_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as OpportunityNote[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function getLocalActivity(): ActivityItem[] {
   if (typeof window === "undefined") {
     return [];
@@ -286,6 +308,15 @@ function getLocalNotifications(): StoredNotification[] {
   }
 }
 
+function saveLocalOpportunityNotes(items: OpportunityNote[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(LOCAL_OPPORTUNITY_NOTES_KEY, JSON.stringify(items));
+  notifyCrmDataChanged();
+}
+
 function saveLocalNotifications(items: StoredNotification[]) {
   if (typeof window === "undefined") {
     return;
@@ -333,6 +364,7 @@ export async function clearCrmOperationalData(): Promise<{
   if (typeof window !== "undefined") {
     [
       LOCAL_OPPORTUNITIES_KEY,
+      LOCAL_OPPORTUNITY_NOTES_KEY,
       LOCAL_CUSTOMERS_KEY,
       LOCAL_ACTIVITY_KEY,
       LOCAL_AGENDA_KEY,
@@ -417,6 +449,14 @@ function parseAuditEvent(notes: string | null | undefined) {
     action,
     target
   };
+}
+
+function parseOpportunityNote(notes: string | null | undefined) {
+  if (!notes?.startsWith(OPPORTUNITY_NOTE_PREFIX)) {
+    return null;
+  }
+
+  return notes.slice(OPPORTUNITY_NOTE_PREFIX.length).trim();
 }
 
 function saveLocalCustomer(item: CustomerItem) {
@@ -546,6 +586,10 @@ function removeLocalOpportunityPreview(opportunityId: string) {
 
 function existingLocalOpportunityCreatedAt(opportunityId: string) {
   return getLocalOpportunityPreviews().find((item) => item.id === opportunityId)?.createdAt ?? undefined;
+}
+
+function sortOpportunityNotesByDateDesc(left: OpportunityNote, right: OpportunityNote) {
+  return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
 }
 
 function buildPipelineFromOpportunities(items: OpportunityItem[]): PipelineColumn[] {
@@ -2645,6 +2689,123 @@ export async function moveOpportunityToStage(input: {
 
   notifyCrmDataChanged();
   return nextItem;
+}
+
+export async function getOpportunityNotes(opportunityId: string): Promise<OpportunityNote[]> {
+  const localNotes = getLocalOpportunityNotes()
+    .filter((item) => item.opportunityId === opportunityId)
+    .sort(sortOpportunityNotesByDateDesc);
+
+  if (opportunityId.startsWith("local-opportunity-")) {
+    return localNotes;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("activities")
+      .select("id, notes, created_at, actor_id, profiles:actor_id(full_name)")
+      .eq("opportunity_id", opportunityId)
+      .eq("kind", "note")
+      .order("created_at", { ascending: false });
+
+    if (error || !data) {
+      return localNotes;
+    }
+
+    const remoteNotes = data
+      .map((item) => {
+        const content = parseOpportunityNote(item.notes);
+
+        if (!content) {
+          return null;
+        }
+
+        const profile = pickOne(item.profiles);
+
+        return {
+          id: item.id,
+          opportunityId,
+          content,
+          author: profile?.full_name ?? "Equipe",
+          createdAt: item.created_at ?? new Date().toISOString()
+        } satisfies OpportunityNote;
+      })
+      .filter((item): item is OpportunityNote => Boolean(item));
+
+    const merged = new Map<string, OpportunityNote>();
+    remoteNotes.forEach((item) => merged.set(item.id, item));
+    localNotes.forEach((item) => merged.set(item.id, item));
+    return Array.from(merged.values()).sort(sortOpportunityNotesByDateDesc);
+  } catch {
+    return localNotes;
+  }
+}
+
+export async function addOpportunityNote(input: {
+  opportunityId: string;
+  opportunityTitle: string;
+  content: string;
+}): Promise<OpportunityNote> {
+  const createdAt = new Date().toISOString();
+  const fallbackNote: OpportunityNote = {
+    id: `opportunity-note-local-${Date.now()}`,
+    opportunityId: input.opportunityId,
+    content: input.content.trim(),
+    author: "Equipe",
+    createdAt
+  };
+
+  const saveFallback = async (author?: string) => {
+    const nextNote = {
+      ...fallbackNote,
+      author: author ?? fallbackNote.author
+    };
+    const next = [nextNote, ...getLocalOpportunityNotes().filter((item) => item.id !== nextNote.id)];
+    saveLocalOpportunityNotes(next);
+    return nextNote;
+  };
+
+  if (!input.content.trim()) {
+    return fallbackNote;
+  }
+
+  if (input.opportunityId.startsWith("local-opportunity-")) {
+    return saveFallback();
+  }
+
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    return saveFallback();
+  }
+
+  const { data, error } = await supabase
+    .from("activities")
+    .insert({
+      organization_id: context.organizationId,
+      opportunity_id: input.opportunityId,
+      actor_id: context.userId,
+      kind: "note",
+      subject: input.opportunityTitle,
+      notes: `${OPPORTUNITY_NOTE_PREFIX}${input.content.trim()}`,
+      completed_at: createdAt
+    })
+    .select("id, notes, created_at")
+    .single();
+
+  if (error || !data) {
+    return saveFallback(context.fullName);
+  }
+
+  notifyCrmDataChanged();
+
+  return {
+    id: data.id,
+    opportunityId: input.opportunityId,
+    content: parseOpportunityNote(data.notes) ?? input.content.trim(),
+    author: context.fullName,
+    createdAt: data.created_at ?? createdAt
+  };
 }
 
 export async function getHistoryActivities(): Promise<ActivityItem[]> {
