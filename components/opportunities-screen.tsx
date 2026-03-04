@@ -50,6 +50,8 @@ export function OpportunitiesScreen() {
   const [expectedCloseDate, setExpectedCloseDate] = useState("");
   const [conclusionStatus, setConclusionStatus] = useState("");
   const [conclusionReason, setConclusionReason] = useState("");
+  const [conclusionDate, setConclusionDate] = useState("");
+  const [isConclusionMode, setIsConclusionMode] = useState(false);
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [newCustomerLegalName, setNewCustomerLegalName] = useState("");
   const [newCustomerTradeName, setNewCustomerTradeName] = useState("");
@@ -149,6 +151,7 @@ export function OpportunitiesScreen() {
     [stageId, stages]
   );
   const showConclusionFields = isConclusionStage(selectedStageLabel);
+  const shouldShowConclusionFields = showConclusionFields || isConclusionMode;
   const boardColumns = useMemo(
     () =>
       STAGE_FLOW.map((stageLabel) => {
@@ -164,15 +167,17 @@ export function OpportunitiesScreen() {
     [opportunities]
   );
   useEffect(() => {
-    if (showConclusionFields) {
+    if (shouldShowConclusionFields) {
       setConclusionStatus((current) => current || CONCLUSION_STATUS_OPTIONS[0]?.id || "");
       setConclusionReason((current) => current || CONCLUSION_REASON_OPTIONS[0]?.id || "");
+      setConclusionDate((current) => current || new Date().toISOString().slice(0, 10));
       return;
     }
 
     setConclusionStatus("");
     setConclusionReason("");
-  }, [showConclusionFields]);
+    setConclusionDate("");
+  }, [shouldShowConclusionFields]);
 
   useEffect(() => {
     if (!recentlyMovedOpportunityId) {
@@ -198,6 +203,8 @@ export function OpportunitiesScreen() {
     setExpectedCloseDate("");
     setConclusionStatus("");
     setConclusionReason("");
+    setConclusionDate("");
+    setIsConclusionMode(false);
     setNewCustomerLegalName("");
     setNewCustomerTradeName("");
     setNewCustomerSegment("");
@@ -312,6 +319,8 @@ export function OpportunitiesScreen() {
     setAccountSearch(opportunity.company);
     setConclusionStatus(opportunity.conclusionStatus ?? "");
     setConclusionReason(opportunity.conclusionReason ?? "");
+    setConclusionDate(toInputDate(opportunity.concludedAt ?? ""));
+    setIsConclusionMode(false);
   }
 
   function openView(opportunity: OpportunityItem) {
@@ -355,7 +364,6 @@ export function OpportunitiesScreen() {
 
       startTransition(() => {
         void (async () => {
-          const nextConclusionDate = showConclusionFields ? new Date().toISOString() : undefined;
           const nextStatus = showConclusionFields ? conclusionStatus || "Conquistado" : "Em andamento";
           const updated = await updateOpportunity({
             id: editingId,
@@ -371,7 +379,7 @@ export function OpportunitiesScreen() {
             status: nextStatus,
             conclusionStatus: showConclusionFields ? conclusionStatus : undefined,
             conclusionReason: showConclusionFields ? conclusionReason : undefined,
-            concludedAt: showConclusionFields ? nextConclusionDate : undefined,
+            concludedAt: showConclusionFields ? `${conclusionDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z` : undefined,
             currentCompany: currentRecord.company,
             currentStage: currentRecord.stage
           });
@@ -410,7 +418,6 @@ export function OpportunitiesScreen() {
           const selectedAccount = accounts.find((item) => item.id === accountId);
           const selectedStage =
             stages.find((item) => item.id === stageId) ?? DEFAULT_STAGE_OPTIONS.find((item) => item.id === stageId);
-          const nextConclusionDate = showConclusionFields ? new Date().toISOString() : undefined;
           const nextStatus = showConclusionFields ? conclusionStatus || "Conquistado" : "Em andamento";
           const normalizedAccountId =
             !nextAccountId || nextAccountId === NEW_ACCOUNT_OPTION || nextAccountId.startsWith("local-customer-")
@@ -429,7 +436,7 @@ export function OpportunitiesScreen() {
           status: nextStatus,
             conclusionStatus: showConclusionFields ? conclusionStatus : undefined,
             conclusionReason: showConclusionFields ? conclusionReason : undefined,
-            concludedAt: showConclusionFields ? nextConclusionDate : undefined,
+            concludedAt: showConclusionFields ? `${conclusionDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z` : undefined,
             accountLabel: nextAccountLabel ?? selectedAccount?.label,
             stageLabel: selectedStage?.label
           });
@@ -439,6 +446,116 @@ export function OpportunitiesScreen() {
           setIsFormModalOpen(false);
         resetForm();
         setFeedback("Oportunidade adicionada.");
+      })();
+    });
+  }
+
+  function startConclusion() {
+    setFeedback(null);
+
+    if (isPending) {
+      return;
+    }
+
+    if (!editingId) {
+      return;
+    }
+
+    if (!canEdit) {
+      setFeedback("Seu perfil nao pode concluir oportunidades.");
+      return;
+    }
+
+    const currentRecord = opportunities.find((item) => item.id === editingId);
+
+    if (!currentRecord) {
+      resetForm();
+      return;
+    }
+
+    const conclusionStage =
+      stages.find((item) => item.label === "Conclusao") ?? DEFAULT_STAGE_OPTIONS.find((item) => item.label === "Conclusao");
+
+    if (!conclusionStage) {
+      setFeedback("Nao foi possivel localizar a etapa de conclusao.");
+      return;
+    }
+
+    setStageId(conclusionStage.id);
+    setIsConclusionMode(true);
+    setConclusionStatus((current) => current || "conquistado");
+    setConclusionReason((current) => current || CONCLUSION_REASON_OPTIONS[0]?.id || "");
+    setConclusionDate((current) => current || new Date().toISOString().slice(0, 10));
+  }
+
+  function handleConcludeNow() {
+    setFeedback(null);
+
+    if (isPending) {
+      return;
+    }
+
+    if (!editingId) {
+      return;
+    }
+
+    if (!canEdit) {
+      setFeedback("Seu perfil nao pode concluir oportunidades.");
+      return;
+    }
+
+    const currentRecord = opportunities.find((item) => item.id === editingId);
+
+    if (!currentRecord) {
+      resetForm();
+      return;
+    }
+
+    const conclusionStage =
+      stages.find((item) => item.label === "Conclusao") ?? DEFAULT_STAGE_OPTIONS.find((item) => item.label === "Conclusao");
+
+    if (!conclusionStage) {
+      setFeedback("Nao foi possivel localizar a etapa de conclusao.");
+      return;
+    }
+
+    startTransition(() => {
+      void (async () => {
+        const updated = await updateOpportunity({
+          id: editingId,
+          title: service,
+          stageId: conclusionStage.id,
+          stageLabel: conclusionStage.label,
+          nextStep,
+          amount: calculatedTicket,
+          baseAmount: Number(amount || 0),
+          isRecurring,
+          months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
+          expectedCloseDate,
+          status: conclusionStatus || "Conquistado",
+          conclusionStatus: conclusionStatus || "Conquistado",
+          conclusionReason: conclusionReason || undefined,
+          concludedAt: `${conclusionDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z`,
+          currentCompany: currentRecord.company,
+          currentStage: currentRecord.stage
+        });
+
+        setOpportunities((current) => {
+          const existing = current.find((item) => item.id === editingId);
+          const merged = existing
+            ? {
+                ...existing,
+                ...updated,
+                owner: existing.owner
+              }
+            : updated;
+
+          return upsertOpportunity(current, merged);
+        });
+        setIsViewMode(false);
+        setIsFormModalOpen(false);
+        resetForm();
+        setFeedback("Oportunidade concluida.");
       })();
     });
   }
@@ -542,8 +659,12 @@ export function OpportunitiesScreen() {
         onConclusionStatusChange={setConclusionStatus}
         conclusionReason={conclusionReason}
         onConclusionReasonChange={setConclusionReason}
+        conclusionDate={conclusionDate}
+        onConclusionDateChange={setConclusionDate}
         calculatedTicket={calculatedTicket}
         onEnableEdit={() => setIsViewMode(false)}
+        onStartConclusion={startConclusion}
+        onConclude={handleConcludeNow}
         onClose={() => {
           setIsViewMode(false);
           setIsFormModalOpen(false);
@@ -552,6 +673,8 @@ export function OpportunitiesScreen() {
         onSubmit={handleSubmit}
         isPending={isPending}
         canSubmit={Boolean(editingId ? canEdit : canCreate) && Boolean(accountId)}
+        canConclude={Boolean(editingId && canEdit && (!showConclusionFields || isConclusionMode))}
+        isConclusionMode={isConclusionMode}
       />
       <CustomerFormModal
         open={isCustomerModalOpen}
@@ -1221,12 +1344,18 @@ function OpportunityFormModal({
   onConclusionStatusChange,
   conclusionReason,
   onConclusionReasonChange,
+  conclusionDate,
+  onConclusionDateChange,
   calculatedTicket,
   onEnableEdit,
+  onStartConclusion,
+  onConclude,
   onClose,
   onSubmit,
   isPending,
-  canSubmit
+  canSubmit,
+  canConclude,
+  isConclusionMode
 }: {
   open: boolean;
   editing: boolean;
@@ -1258,12 +1387,18 @@ function OpportunityFormModal({
   onConclusionStatusChange: (value: string) => void;
   conclusionReason: string;
   onConclusionReasonChange: (value: string) => void;
+  conclusionDate: string;
+  onConclusionDateChange: (value: string) => void;
   calculatedTicket: number;
   onEnableEdit: () => void;
+  onStartConclusion: () => void;
+  onConclude: () => void;
   onClose: () => void;
   onSubmit: () => void;
   isPending: boolean;
   canSubmit: boolean;
+  canConclude: boolean;
+  isConclusionMode: boolean;
 }) {
   if (!open) {
     return null;
@@ -1422,7 +1557,7 @@ function OpportunityFormModal({
               />
             </div>
 
-            {showConclusionFields ? (
+            {showConclusionFields || isConclusionMode ? (
               <div
                 style={{
                   display: "grid",
@@ -1437,14 +1572,20 @@ function OpportunityFormModal({
                   value={conclusionStatus}
                   onChange={onConclusionStatusChange}
                   options={CONCLUSION_STATUS_OPTIONS}
-                  disabled={viewMode}
+                  disabled={viewMode && !isConclusionMode}
                 />
                 <SelectField
                   label="Motivo da conclusao"
                   value={conclusionReason}
                   onChange={onConclusionReasonChange}
                   options={CONCLUSION_REASON_OPTIONS}
-                  disabled={viewMode}
+                  disabled={viewMode && !isConclusionMode}
+                />
+                <DateField
+                  label="Data da conclusao"
+                  value={conclusionDate}
+                  onChange={onConclusionDateChange}
+                  disabled={viewMode && !isConclusionMode}
                 />
               </div>
             ) : null}
@@ -1539,9 +1680,21 @@ function OpportunityFormModal({
             {viewMode ? "Fechar" : "Cancelar"}
           </button>
           {editing && viewMode ? (
-            <button type="button" onClick={onEnableEdit} disabled={!canSubmit} style={submitButtonStyle}>
-              Editar agora
-            </button>
+            <>
+              {!isConclusionMode && !showConclusionFields ? (
+                <button type="button" onClick={onStartConclusion} disabled={isPending || !canConclude} style={submitButtonStyle}>
+                  Concluir
+                </button>
+              ) : null}
+              {isConclusionMode ? (
+                <button type="button" onClick={onConclude} disabled={isPending || !canConclude} style={submitButtonStyle}>
+                  {isPending ? "Concluindo..." : "Salvar conclusao"}
+                </button>
+              ) : null}
+              <button type="button" onClick={onEnableEdit} disabled={!canSubmit} style={submitButtonStyle}>
+                Editar agora
+              </button>
+            </>
           ) : (
             <button type="button" onClick={onSubmit} disabled={isPending || !canSubmit} style={submitButtonStyle}>
               {isPending ? "Salvando..." : editing ? "Salvar edicao" : "Salvar oportunidade"}
