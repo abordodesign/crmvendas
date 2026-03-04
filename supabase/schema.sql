@@ -214,6 +214,11 @@ on public.accounts
 for update
 using (organization_id = public.current_profile_org());
 
+create policy "org scoped delete accounts"
+on public.accounts
+for delete
+using (organization_id = public.current_profile_org());
+
 create policy "org scoped read contacts"
 on public.contacts
 for select

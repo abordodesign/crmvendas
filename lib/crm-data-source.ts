@@ -1809,9 +1809,9 @@ export async function deleteCustomer(input: { id: string; tradeName: string }): 
     return { ok: true, message: "Cliente removido." };
   }
 
-  const { error } = await supabase.from("accounts").delete().eq("id", input.id);
+  const { data, error } = await supabase.from("accounts").delete().eq("id", input.id).select("id").maybeSingle();
 
-  if (error) {
+  if (error || !data) {
     return { ok: false, message: "Nao foi possivel excluir o cliente." };
   }
 
