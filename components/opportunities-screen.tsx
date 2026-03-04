@@ -49,6 +49,7 @@ export function OpportunitiesScreen() {
   const [newCustomerLegalName, setNewCustomerLegalName] = useState("");
   const [newCustomerTradeName, setNewCustomerTradeName] = useState("");
   const [newCustomerSegment, setNewCustomerSegment] = useState("");
+  const [newCustomerCompanyContactName, setNewCustomerCompanyContactName] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
   const [newCustomerEmail, setNewCustomerEmail] = useState("");
   const [newCustomerAddress, setNewCustomerAddress] = useState("");
@@ -194,6 +195,7 @@ export function OpportunitiesScreen() {
     setNewCustomerLegalName("");
     setNewCustomerTradeName("");
     setNewCustomerSegment("");
+    setNewCustomerCompanyContactName("");
     setNewCustomerPhone("");
     setNewCustomerEmail("");
     setNewCustomerAddress("");
@@ -219,6 +221,7 @@ export function OpportunitiesScreen() {
     setNewCustomerLegalName("");
     setNewCustomerTradeName("");
     setNewCustomerSegment("");
+    setNewCustomerCompanyContactName("");
     setNewCustomerPhone("");
     setNewCustomerEmail("");
     setNewCustomerAddress("");
@@ -251,6 +254,7 @@ export function OpportunitiesScreen() {
           legalName: newCustomerLegalName,
           tradeName: newCustomerTradeName,
           segment: newCustomerSegment,
+          companyContactName: newCustomerCompanyContactName,
           phone: newCustomerPhone,
           email: newCustomerEmail,
           address: newCustomerAddress,
@@ -507,6 +511,7 @@ export function OpportunitiesScreen() {
           legalName: newCustomerLegalName,
           tradeName: newCustomerTradeName,
           segment: newCustomerSegment,
+          companyContactName: newCustomerCompanyContactName,
           phone: newCustomerPhone,
           email: newCustomerEmail,
           address: newCustomerAddress,
@@ -520,6 +525,7 @@ export function OpportunitiesScreen() {
             legalName: setNewCustomerLegalName,
             tradeName: setNewCustomerTradeName,
             segment: setNewCustomerSegment,
+            companyContactName: setNewCustomerCompanyContactName,
             phone: setNewCustomerPhone,
             email: setNewCustomerEmail,
             address: setNewCustomerAddress,

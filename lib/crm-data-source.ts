@@ -1111,6 +1111,7 @@ export async function getCustomers(): Promise<CustomerItem[]> {
         legalName: account.legal_name ?? "Sem razao social",
         tradeName: account.trade_name ?? account.legal_name ?? "Sem nome fantasia",
         segment: account.segment ?? "Nao informado",
+        companyContactName: "",
         phone: "",
         email: "",
         address: "",
@@ -1375,6 +1376,7 @@ export async function createCustomer(input: {
   legalName: string;
   tradeName: string;
   segment: string;
+  companyContactName: string;
   phone: string;
   email: string;
   address: string;
@@ -1390,6 +1392,7 @@ export async function createCustomer(input: {
     legalName: input.legalName,
     tradeName: input.tradeName || input.legalName,
     segment: input.segment || "Nao informado",
+    companyContactName: input.companyContactName,
     phone: input.phone,
     email: input.email,
     address: input.address,
@@ -1438,6 +1441,7 @@ export async function createCustomer(input: {
     legalName: data.legal_name,
     tradeName: data.trade_name ?? data.legal_name,
     segment: data.segment ?? "Nao informado",
+    companyContactName: input.companyContactName,
     phone: input.phone,
     email: input.email,
     address: input.address,
@@ -1468,6 +1472,7 @@ export async function updateCustomer(input: {
   legalName: string;
   tradeName: string;
   segment: string;
+  companyContactName: string;
   phone: string;
   email: string;
   address: string;
@@ -1483,6 +1488,7 @@ export async function updateCustomer(input: {
     legalName: input.legalName,
     tradeName: input.tradeName || input.legalName,
     segment: input.segment || "Nao informado",
+    companyContactName: input.companyContactName,
     phone: input.phone,
     email: input.email,
     address: input.address,
@@ -1530,6 +1536,7 @@ export async function updateCustomer(input: {
     legalName: data.legal_name,
     tradeName: data.trade_name ?? data.legal_name,
     segment: data.segment ?? "Nao informado",
+    companyContactName: input.companyContactName,
     phone: input.phone,
     email: input.email,
     address: input.address,

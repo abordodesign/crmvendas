@@ -71,6 +71,7 @@ export type CustomerItem = {
   legalName: string;
   tradeName: string;
   segment: string;
+  companyContactName: string;
   phone: string;
   email: string;
   address: string;

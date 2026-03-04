@@ -15,6 +15,7 @@ export function CustomersScreen() {
   const [legalName, setLegalName] = useState("");
   const [tradeName, setTradeName] = useState("");
   const [segment, setSegment] = useState("");
+  const [companyContactName, setCompanyContactName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
@@ -71,6 +72,7 @@ export function CustomersScreen() {
           legalName,
           tradeName,
           segment,
+          companyContactName,
           phone,
           email,
           address,
@@ -97,6 +99,7 @@ export function CustomersScreen() {
     setLegalName(customer.legalName);
     setTradeName(customer.tradeName);
     setSegment(customer.segment);
+    setCompanyContactName(customer.companyContactName);
     setPhone(customer.phone);
     setEmail(customer.email);
     setAddress(customer.address);
@@ -113,6 +116,7 @@ export function CustomersScreen() {
     setLegalName("");
     setTradeName("");
     setSegment("");
+    setCompanyContactName("");
     setPhone("");
     setEmail("");
     setAddress("");
@@ -146,6 +150,7 @@ export function CustomersScreen() {
             legalName,
             tradeName,
             segment,
+            companyContactName,
             phone,
             email,
             address,
@@ -194,6 +199,7 @@ export function CustomersScreen() {
           legalName,
           tradeName,
           segment,
+          companyContactName,
           phone,
           email,
           address,
@@ -207,6 +213,7 @@ export function CustomersScreen() {
             legalName: setLegalName,
             tradeName: setTradeName,
             segment: setSegment,
+            companyContactName: setCompanyContactName,
             phone: setPhone,
             email: setEmail,
             address: setAddress,
@@ -340,14 +347,17 @@ export function CustomersScreen() {
                   </div>
                 </div>
                 <div style={{ flexShrink: 0 }}>
-                  <button
-                    type="button"
-                    onClick={() => startEdit(customer)}
-                    disabled={!canManageCustomers}
-                    style={editButtonStyle}
-                  >
-                    Editar
-                  </button>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <WhatsAppButton phone={customer.phone} />
+                    <button
+                      type="button"
+                      onClick={() => startEdit(customer)}
+                      disabled={!canManageCustomers}
+                      style={editButtonStyle}
+                    >
+                      Editar
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -385,13 +395,14 @@ export function CustomersScreen() {
                 }}
               >
                 <DataCell label="Segmento" value={customer.segment} />
+                <DataCell label="Responsavel da empresa" value={customer.companyContactName || "-"} />
                 <DataCell label="Telefone" value={customer.phone || "-"} />
                 <DataCell label="E-mail" value={customer.email || "-"} />
                 <DataCell label="Documento" value={customer.document || "-"} />
                 <DataCell label="Cidade" value={customer.city || "-"} />
                 <DataCell label="Estado" value={customer.state || "-"} />
                 <DataCell label="CEP" value={customer.zipCode || "-"} />
-                <DataCell label="Responsavel" value={customer.owner} />
+                <DataCell label="Responsavel interno" value={customer.owner} />
                 <DataCell label="Contatos" value={String(customer.contacts)} />
                 <DataCell label="Status" value={customer.status} emphasis />
               </div>
@@ -400,6 +411,35 @@ export function CustomersScreen() {
         </div>
       </section>
     </CrmShell>
+  );
+}
+
+function buildWhatsAppHref(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+
+  if (!digits) {
+    return null;
+  }
+
+  const normalized = digits.length <= 11 && !digits.startsWith("55") ? `55${digits}` : digits;
+  return `https://wa.me/${normalized}`;
+}
+
+function WhatsAppButton({ phone }: { phone: string }) {
+  const href = buildWhatsAppHref(phone);
+
+  if (!href) {
+    return (
+      <button type="button" disabled style={disabledWhatsAppButtonStyle}>
+        WhatsApp
+      </button>
+    );
+  }
+
+  return (
+    <a href={href} target="_blank" rel="noreferrer" style={whatsAppButtonStyle}>
+      WhatsApp
+    </a>
   );
 }
 
@@ -475,4 +515,23 @@ const editButtonStyle: React.CSSProperties = {
   color: "var(--accent)",
   fontWeight: 800,
   cursor: "pointer"
+};
+
+const whatsAppButtonStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: 12,
+  padding: "10px 12px",
+  background: "rgba(22, 163, 74, 0.12)",
+  border: "1px solid rgba(22, 163, 74, 0.2)",
+  color: "#15803d",
+  fontWeight: 800,
+  textDecoration: "none"
+};
+
+const disabledWhatsAppButtonStyle: React.CSSProperties = {
+  ...whatsAppButtonStyle,
+  opacity: 0.45,
+  cursor: "not-allowed"
 };

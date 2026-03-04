@@ -4,6 +4,7 @@ type CustomerFormValues = {
   legalName: string;
   tradeName: string;
   segment: string;
+  companyContactName: string;
   phone: string;
   email: string;
   address: string;
@@ -67,6 +68,11 @@ export function CustomerFormModal({
               <Field label="Razao social" value={values.legalName} onChange={(value) => onChange("legalName", value)} required />
               <Field label="Nome fantasia" value={values.tradeName} onChange={(value) => onChange("tradeName", value)} />
               <Field label="Segmento" value={values.segment} onChange={(value) => onChange("segment", value)} />
+              <Field
+                label="Nome do responsavel da empresa"
+                value={values.companyContactName}
+                onChange={(value) => onChange("companyContactName", value)}
+              />
               <Field label="Telefone" value={values.phone} onChange={(value) => onChange("phone", value)} />
               <Field label="E-mail" value={values.email} onChange={(value) => onChange("email", value)} />
             </div>
@@ -86,6 +92,7 @@ export function CustomerFormModal({
               <div style={sectionTitleStyle}>Resumo do cadastro</div>
               <div style={summaryBoxStyle}>
                 <ModalStat label="Nome fantasia" value={values.tradeName || "Nao informado"} />
+                <ModalStat label="Responsavel da empresa" value={values.companyContactName || "Nao informado"} />
                 <ModalStat label="Documento" value={values.document || "Nao informado"} />
                 <ModalStat label="Cidade/Estado" value={[values.city, values.state].filter(Boolean).join(" / ") || "Nao informado"} />
               </div>
