@@ -26,6 +26,10 @@ import type { OpportunityItem } from "@/types/crm-app";
 const NEW_ACCOUNT_OPTION = "__new__";
 const STAGE_FLOW = ["Prospect", "Qualificado", "Apresentacao", "Proposta", "Negociacao", "Conclusao"];
 
+function upsertOpportunity(items: OpportunityItem[], nextItem: OpportunityItem) {
+  return [nextItem, ...items.filter((item) => item.id !== nextItem.id)];
+}
+
 export function OpportunitiesScreen() {
   const [settings, setSettings] = useState(defaultCrmSettings);
   const role = useCrmRole();
@@ -246,6 +250,10 @@ export function OpportunitiesScreen() {
   }
 
   function handleCreateCustomerFromModal() {
+    if (isPending) {
+      return;
+    }
+
     if (!newCustomerLegalName.trim()) {
       return;
     }
@@ -328,6 +336,10 @@ export function OpportunitiesScreen() {
   function handleSubmit() {
     setFeedback(null);
 
+    if (isPending) {
+      return;
+    }
+
     if (editingId) {
       if (!canEdit) {
         setFeedback("Seu perfil nao pode editar oportunidades.");
@@ -364,17 +376,18 @@ export function OpportunitiesScreen() {
             currentStage: currentRecord.stage
           });
 
-          setOpportunities((current) =>
-            current.map((item) =>
-              item.id === editingId
-                ? {
-                    ...item,
-                    ...updated,
-                    owner: item.owner
-                  }
-                : item
-            )
-          );
+          setOpportunities((current) => {
+            const existing = current.find((item) => item.id === editingId);
+            const merged = existing
+              ? {
+                  ...existing,
+                  ...updated,
+                  owner: existing.owner
+                }
+              : updated;
+
+            return upsertOpportunity(current, merged);
+          });
           setIsViewMode(false);
           setIsFormModalOpen(false);
           resetForm();
@@ -421,7 +434,7 @@ export function OpportunitiesScreen() {
             stageLabel: selectedStage?.label
           });
 
-          setOpportunities((current) => [created, ...current]);
+          setOpportunities((current) => upsertOpportunity(current, created));
           setIsViewMode(false);
           setIsFormModalOpen(false);
         resetForm();
@@ -474,16 +487,16 @@ export function OpportunitiesScreen() {
     startTransition(() => {
       void (async () => {
         const currentOpportunity = opportunityPendingDelete;
-        const success = await deleteOpportunity({
+        const result = await deleteOpportunity({
           id: currentOpportunity.id,
           title: currentOpportunity.title
         });
 
-        if (success) {
+        if (result.ok) {
           setOpportunities((current) => current.filter((item) => item.id !== currentOpportunity.id));
-          setFeedback("Oportunidade excluida.");
+          setFeedback(result.message);
         } else {
-          setFeedback("Nao foi possivel excluir a oportunidade.");
+          setFeedback(result.message);
         }
 
         setOpportunityPendingDelete(null);

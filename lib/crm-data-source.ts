@@ -46,6 +46,12 @@ type NotificationRuleDraft = {
   entityId?: string;
 };
 
+type CurrentUserContext = {
+  userId: string;
+  organizationId: string;
+  fullName: string;
+};
+
 const LOCAL_OPPORTUNITIES_KEY = "crm_local_opportunity_previews";
 const LOCAL_CUSTOMERS_KEY = "crm_local_customers";
 const LOCAL_ACTIVITY_KEY = "crm_local_activity";
@@ -54,6 +60,24 @@ const LOCAL_NOTIFICATIONS_KEY = "crm_local_notifications";
 const CRM_DATA_CHANGED_EVENT = "crm:data-changed";
 const STAGE_NOTE_PREFIX = "stage_move:";
 const AUDIT_NOTE_PREFIX = "audit:";
+const USER_CONTEXT_CACHE_TTL_MS = 5000;
+const QUERY_CACHE_TTL_MS = 4000;
+const DASHBOARD_PIPELINE_LIMIT = 120;
+const REFERENCE_ITEMS_LIMIT = 200;
+let currentUserContextCache:
+  | {
+      expiresAt: number;
+      promise: Promise<CurrentUserContext | null>;
+    }
+  | null = null;
+const queryCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    promise: Promise<unknown>;
+  }
+>();
+
 export const DEFAULT_STAGE_OPTIONS: ReferenceOption[] = [
   { id: "prospect", label: "Prospect" },
   { id: "qualified", label: "Qualificado" },
@@ -361,6 +385,7 @@ export function notifyCrmDataChanged() {
     return;
   }
 
+  queryCache.clear();
   window.dispatchEvent(new Event(CRM_DATA_CHANGED_EVENT));
 }
 
@@ -369,13 +394,43 @@ export function subscribeCrmDataChanged(callback: () => void) {
     return () => undefined;
   }
 
-  window.addEventListener(CRM_DATA_CHANGED_EVENT, callback);
-  window.addEventListener("storage", callback);
+  const handleChange = () => {
+    queryCache.clear();
+    callback();
+  };
+
+  window.addEventListener(CRM_DATA_CHANGED_EVENT, handleChange);
+  window.addEventListener("storage", handleChange);
 
   return () => {
-    window.removeEventListener(CRM_DATA_CHANGED_EVENT, callback);
-    window.removeEventListener("storage", callback);
+    window.removeEventListener(CRM_DATA_CHANGED_EVENT, handleChange);
+    window.removeEventListener("storage", handleChange);
   };
+}
+
+function getCachedQuery<T>(cacheKey: string, loader: () => Promise<T>, ttlMs = QUERY_CACHE_TTL_MS): Promise<T> {
+  const cached = queryCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.promise as Promise<T>;
+  }
+
+  const promise = loader();
+
+  queryCache.set(cacheKey, {
+    expiresAt: Date.now() + ttlMs,
+    promise
+  });
+
+  promise.catch(() => {
+    const active = queryCache.get(cacheKey);
+
+    if (active?.promise === promise) {
+      queryCache.delete(cacheKey);
+    }
+  });
+
+  return promise;
 }
 
 function saveLocalOpportunityPreview(item: OpportunityItem) {
@@ -900,12 +955,13 @@ function agendaKindFromCategory(category: string | undefined) {
 }
 
 export async function getDashboardData(): Promise<DashboardData> {
-  const localPreviews = getLocalOpportunityPreviews();
-  const localActivity = getLocalActivity();
-  const localAgenda = getLocalAgenda();
-  const currentContext = await getCurrentUserContext();
+  return getCachedQuery("dashboard:data", async () => {
+    const localPreviews = getLocalOpportunityPreviews();
+    const localActivity = getLocalActivity();
+    const localAgenda = getLocalAgenda();
+    const currentContext = await getCurrentUserContext();
 
-  try {
+    try {
     const [stagesRes, opportunitiesRes, tasksRes, activitiesRes, agendaRes, accountsRes] = await Promise.all([
       supabase.from("pipeline_stages").select("id, name, stage_order"),
       supabase
@@ -913,7 +969,8 @@ export async function getDashboardData(): Promise<DashboardData> {
         .select(
           "id, title, amount, base_amount, is_recurring, months, stage_id, owner_id, status, expected_close_date, accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
-        .order("created_at", { ascending: false }),
+        .order("created_at", { ascending: false })
+        .limit(DASHBOARD_PIPELINE_LIMIT),
       supabase
         .from("tasks")
         .select(
@@ -937,7 +994,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         .not("scheduled_for", "is", null)
         .order("scheduled_for", { ascending: true })
         .limit(6),
-      supabase.from("accounts").select("id")
+      supabase.from("accounts").select("id", { count: "exact", head: true })
     ]);
 
     if (
@@ -1092,7 +1149,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       }) ?? seedActivity;
 
     const opportunityCount = opportunitiesRes.data?.length ?? 0;
-    const accountsCount = accountsRes.data?.length ?? 0;
+    const accountsCount = accountsRes.count ?? 0;
     const totalPipeline = opportunitiesRes.data?.reduce(
       (sum, opportunity) => sum + (typeof opportunity.amount === "number" ? opportunity.amount : 0),
       0
@@ -1158,186 +1215,206 @@ export async function getDashboardData(): Promise<DashboardData> {
       agenda: mergeAgendaItems(localAgenda, agenda.length ? agenda : seedAgenda).slice(0, 6),
       activity: [...localActivity, ...(activity.length ? activity : seedActivity)].sort(sortActivityByDateDesc).slice(0, 6)
     };
-  } catch {
-    return {
-      ...seedDashboardData,
-      agenda: mergeAgendaItems(localAgenda, seedAgenda).slice(0, 6),
-      activity: [...localActivity, ...seedActivity].sort(sortActivityByDateDesc).slice(0, 6)
-    };
-  }
+    } catch {
+      return {
+        ...seedDashboardData,
+        agenda: mergeAgendaItems(localAgenda, seedAgenda).slice(0, 6),
+        activity: [...localActivity, ...seedActivity].sort(sortActivityByDateDesc).slice(0, 6)
+      };
+    }
+  });
 }
 
 export async function getCustomers(): Promise<CustomerItem[]> {
-  const localCustomers = getLocalCustomers();
-  const currentContext = await getCurrentUserContext();
+  return getCachedQuery("customers:list", async () => {
+    const localCustomers = getLocalCustomers();
+    const currentContext = await getCurrentUserContext();
 
-  try {
-    const { data, error } = await supabase
-      .from("accounts")
-      .select(
-        "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, owner_id, contacts(id), profiles:owner_id(full_name)"
-      )
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("accounts")
+        .select(
+          "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, owner_id, contacts(id), profiles:owner_id(full_name)"
+        )
+        .order("created_at", { ascending: false });
 
-    if (error || !data) {
+      if (error || !data) {
+        return mergeCustomers(seedCustomers, localCustomers);
+      }
+
+      const remoteCustomers = data.map((account) => {
+        const owner = pickOne(account.profiles);
+        const contacts = Array.isArray(account.contacts) ? account.contacts.length : 0;
+
+        return {
+          id: account.id,
+          legalName: account.legal_name ?? "Sem razao social",
+          tradeName: account.trade_name ?? account.legal_name ?? "Sem nome fantasia",
+          segment: account.segment ?? "Nao informado",
+          companyContactName: account.primary_contact_name ?? "",
+          phone: account.phone ?? "",
+          email: account.email ?? "",
+          address: account.address ?? "",
+          city: account.city ?? "",
+          state: account.state ?? "",
+          zipCode: account.zip_code ?? "",
+          document: account.document ?? "",
+          owner: resolveCurrentUserLabel(currentContext, account.owner_id, owner?.full_name ?? "Sem responsavel"),
+          contacts,
+          status: mapAccountStatusToUi(account.status)
+        };
+      });
+
+      return mergeCustomers(remoteCustomers, localCustomers);
+    } catch {
       return mergeCustomers(seedCustomers, localCustomers);
     }
-
-    const remoteCustomers = data.map((account) => {
-      const owner = pickOne(account.profiles);
-      const contacts = Array.isArray(account.contacts) ? account.contacts.length : 0;
-
-      return {
-        id: account.id,
-        legalName: account.legal_name ?? "Sem razao social",
-        tradeName: account.trade_name ?? account.legal_name ?? "Sem nome fantasia",
-        segment: account.segment ?? "Nao informado",
-        companyContactName: account.primary_contact_name ?? "",
-        phone: account.phone ?? "",
-        email: account.email ?? "",
-        address: account.address ?? "",
-        city: account.city ?? "",
-        state: account.state ?? "",
-        zipCode: account.zip_code ?? "",
-        document: account.document ?? "",
-        owner: resolveCurrentUserLabel(currentContext, account.owner_id, owner?.full_name ?? "Sem responsavel"),
-        contacts,
-        status: mapAccountStatusToUi(account.status)
-      };
-    });
-
-    return mergeCustomers(remoteCustomers, localCustomers);
-  } catch {
-    return mergeCustomers(seedCustomers, localCustomers);
-  }
+  });
 }
 
 export async function getOpportunities(): Promise<OpportunityItem[]> {
-  const localPreviews = getLocalOpportunityPreviews();
-  const currentContext = await getCurrentUserContext();
+  return getCachedQuery("opportunities:list", async () => {
+    const localPreviews = getLocalOpportunityPreviews();
+    const currentContext = await getCurrentUserContext();
 
-  try {
-    const { data, error } = await supabase
-      .from("opportunities")
-      .select(
-        "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
-      )
-      .order("created_at", { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from("opportunities")
+        .select(
+          "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+        )
+        .order("created_at", { ascending: false });
 
-    if (error || !data) {
+      if (error || !data) {
+        return localPreviews.length ? mergeOpportunities(localPreviews, seedOpportunities) : seedOpportunities;
+      }
+
+      const fetched = data.map((opportunity) => {
+        const stage = pickOne(opportunity.pipeline_stages);
+        const account = pickOne(opportunity.accounts);
+        const owner = pickOne(opportunity.profiles);
+
+        return {
+          id: opportunity.id,
+          title: opportunity.title,
+          company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
+          stage: stage?.name ?? "Sem etapa",
+          owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
+          nextStep: opportunity.next_step ?? "Atualizar proximo passo",
+          baseAmount: currency(opportunity.base_amount),
+          isRecurring: Boolean(opportunity.is_recurring),
+          months: opportunity.months ?? 1,
+          amount: currency(opportunity.amount),
+          expectedCloseDate: formatDate(opportunity.expected_close_date),
+          status: mapDbOpportunityStatusToUi(opportunity.status),
+          conclusionStatus: opportunity.conclusion_status ?? undefined,
+          conclusionReason: opportunity.conclusion_reason ?? undefined,
+          concludedAt: opportunity.concluded_at ?? undefined
+        };
+      });
+
+      return mergeOpportunities(localPreviews, fetched);
+    } catch {
       return localPreviews.length ? mergeOpportunities(localPreviews, seedOpportunities) : seedOpportunities;
     }
-
-    const fetched = data.map((opportunity) => {
-      const stage = pickOne(opportunity.pipeline_stages);
-      const account = pickOne(opportunity.accounts);
-      const owner = pickOne(opportunity.profiles);
-
-      return {
-        id: opportunity.id,
-        title: opportunity.title,
-        company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
-        stage: stage?.name ?? "Sem etapa",
-        owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
-        nextStep: opportunity.next_step ?? "Atualizar proximo passo",
-        baseAmount: currency(opportunity.base_amount),
-        isRecurring: Boolean(opportunity.is_recurring),
-        months: opportunity.months ?? 1,
-        amount: currency(opportunity.amount),
-        expectedCloseDate: formatDate(opportunity.expected_close_date),
-        status: mapDbOpportunityStatusToUi(opportunity.status),
-        conclusionStatus: opportunity.conclusion_status ?? undefined,
-        conclusionReason: opportunity.conclusion_reason ?? undefined,
-        concludedAt: opportunity.concluded_at ?? undefined
-      };
-    });
-
-    return mergeOpportunities(localPreviews, fetched);
-  } catch {
-    return localPreviews.length ? mergeOpportunities(localPreviews, seedOpportunities) : seedOpportunities;
-  }
+  });
 }
 
 export async function getTasks(): Promise<TaskItem[]> {
-  try {
-    const { data, error } = await supabase
-      .from("tasks")
-      .select(
-        "id, title, due_at, priority, opportunities:opportunity_id(accounts:account_id(trade_name, legal_name), title)"
-      )
-      .order("due_at", { ascending: true });
+  return getCachedQuery("tasks:list", async () => {
+    try {
+      const { data, error } = await supabase
+        .from("tasks")
+        .select(
+          "id, title, due_at, priority, opportunities:opportunity_id(accounts:account_id(trade_name, legal_name), title)"
+        )
+        .order("due_at", { ascending: true });
 
-    if (error || !data) {
+      if (error || !data) {
+        return seedTasks;
+      }
+
+      return data.map((task) => {
+        const opportunity = pickOne(task.opportunities);
+        const account = pickOne(opportunity?.accounts);
+
+        return {
+          id: task.id,
+          title: task.title,
+          company: account?.trade_name ?? account?.legal_name ?? opportunity?.title ?? "Sem conta",
+          due: formatDateTime(task.due_at),
+          priority: task.priority ?? "Media",
+          dueDate: toDateInput(task.due_at),
+          dueTime: toTimeInput(task.due_at)
+        };
+      });
+    } catch {
       return seedTasks;
     }
-
-    return data.map((task) => {
-      const opportunity = pickOne(task.opportunities);
-      const account = pickOne(opportunity?.accounts);
-
-      return {
-        id: task.id,
-        title: task.title,
-        company: account?.trade_name ?? account?.legal_name ?? opportunity?.title ?? "Sem conta",
-        due: formatDateTime(task.due_at),
-        priority: task.priority ?? "Media",
-        dueDate: toDateInput(task.due_at),
-        dueTime: toTimeInput(task.due_at)
-      };
-    });
-  } catch {
-    return seedTasks;
-  }
+  });
 }
 
 async function getCurrentUserContext() {
-  const {
-    data: { session }
-  } = await supabase.auth.getSession();
-
-  const userId = session?.user?.id;
-
-  if (!userId) {
-    return null;
+  if (currentUserContextCache && currentUserContextCache.expiresAt > Date.now()) {
+    return currentUserContextCache.promise;
   }
 
-  async function fetchProfile() {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("organization_id, full_name")
-      .eq("id", userId)
-      .maybeSingle();
+  const promise = (async () => {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
 
-    return profile;
-  }
+    const userId = session?.user?.id;
 
-  let profile = await fetchProfile();
-
-  if (!profile?.organization_id) {
-    try {
-      await fetch("/api/auth/bootstrap", {
-        method: "POST",
-        cache: "no-store"
-      });
-    } catch {
-      // Se o bootstrap falhar, retornamos null no fluxo ja existente.
+    if (!userId) {
+      return null;
     }
 
-    profile = await fetchProfile();
-  }
+    async function fetchProfile() {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("organization_id, full_name")
+        .eq("id", userId)
+        .maybeSingle();
 
-  if (!profile?.organization_id) {
-    return null;
-  }
+      return profile;
+    }
 
-  const settings = await getCrmSettings();
-  const displayName = settings.displayName?.trim();
+    let profile = await fetchProfile();
 
-  return {
-    userId,
-    organizationId: profile.organization_id,
-    fullName: displayName || profile.full_name || "Equipe"
+    if (!profile?.organization_id) {
+      try {
+        await fetch("/api/auth/bootstrap", {
+          method: "POST",
+          cache: "no-store"
+        });
+      } catch {
+        // Se o bootstrap falhar, retornamos null no fluxo ja existente.
+      }
+
+      profile = await fetchProfile();
+    }
+
+    if (!profile?.organization_id) {
+      return null;
+    }
+
+    const settings = await getCrmSettings();
+    const displayName = settings.displayName?.trim();
+
+    return {
+      userId,
+      organizationId: profile.organization_id,
+      fullName: displayName || profile.full_name || "Equipe"
+    };
+  })();
+
+  currentUserContextCache = {
+    expiresAt: Date.now() + USER_CONTEXT_CACHE_TTL_MS,
+    promise
   };
+
+  return promise;
 }
 
 async function recordCrmActivity(input: {
@@ -1399,61 +1476,113 @@ export async function getReferenceOptions(): Promise<{
   accounts: ReferenceOption[];
   stages: ReferenceOption[];
 }> {
-  const localCustomers = getLocalCustomers();
-  const seedAccounts = seedCustomers.map((item) => ({
-    id: item.id,
-    label: item.tradeName || item.legalName || "Conta sem nome",
-    searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
-  }));
-
-  try {
-    const [accountsRes, stagesRes] = await Promise.all([
-      supabase.from("accounts").select("id, trade_name, legal_name").order("created_at", { ascending: false }),
-      supabase.from("pipeline_stages").select("id, name, stage_order").order("stage_order", { ascending: true })
-    ]);
-
-    const remoteAccounts =
-      accountsRes.data?.map((item) => ({
-        id: item.id,
-        label: item.trade_name ?? item.legal_name ?? "Conta sem nome",
-        searchText: [item.trade_name, item.legal_name].filter(Boolean).join(" ").toLowerCase()
-      })) ?? [];
-    const localAccounts = localCustomers.map((item) => ({
+  return getCachedQuery("references:options", async () => {
+    const localCustomers = getLocalCustomers();
+    const seedAccounts = seedCustomers.map((item) => ({
       id: item.id,
       label: item.tradeName || item.legalName || "Conta sem nome",
       searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
     }));
-    const mergedAccounts = Array.from(
-      new Map([...seedAccounts, ...remoteAccounts, ...localAccounts].map((item) => [item.id, item])).values()
-    );
 
-    return {
-      accounts: mergedAccounts,
-      stages:
-        stagesRes.data?.length
-          ? stagesRes.data.map((item) => ({
-              id: item.id,
-              label: item.name
-            }))
-          : DEFAULT_STAGE_OPTIONS
-    };
-  } catch {
-    return {
-      accounts: Array.from(
-        new Map(
-          [
-            ...seedAccounts,
-            ...localCustomers.map((item) => ({
-              id: item.id,
-              label: item.tradeName || item.legalName || "Conta sem nome",
-              searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
-            }))
-          ].map((item) => [item.id, item])
-        ).values()
-      ),
-      stages: DEFAULT_STAGE_OPTIONS
-    };
-  }
+    try {
+      const [accountsRes, stagesRes] = await Promise.all([
+        supabase
+          .from("accounts")
+          .select("id, trade_name, legal_name")
+          .order("created_at", { ascending: false })
+          .limit(REFERENCE_ITEMS_LIMIT),
+        supabase.from("pipeline_stages").select("id, name, stage_order").order("stage_order", { ascending: true })
+      ]);
+
+      const remoteAccounts =
+        accountsRes.data?.map((item) => ({
+          id: item.id,
+          label: item.trade_name ?? item.legal_name ?? "Conta sem nome",
+          searchText: [item.trade_name, item.legal_name].filter(Boolean).join(" ").toLowerCase()
+        })) ?? [];
+      const localAccounts = localCustomers.map((item) => ({
+        id: item.id,
+        label: item.tradeName || item.legalName || "Conta sem nome",
+        searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
+      }));
+      const mergedAccounts = Array.from(
+        new Map([...seedAccounts, ...remoteAccounts, ...localAccounts].map((item) => [item.id, item])).values()
+      );
+
+      return {
+        accounts: mergedAccounts,
+        stages:
+          stagesRes.data?.length
+            ? stagesRes.data.map((item) => ({
+                id: item.id,
+                label: item.name
+              }))
+            : DEFAULT_STAGE_OPTIONS
+      };
+    } catch {
+      return {
+        accounts: Array.from(
+          new Map(
+            [
+              ...seedAccounts,
+              ...localCustomers.map((item) => ({
+                id: item.id,
+                label: item.tradeName || item.legalName || "Conta sem nome",
+                searchText: [item.tradeName, item.legalName, item.email, item.document].filter(Boolean).join(" ").toLowerCase()
+              }))
+            ].map((item) => [item.id, item])
+          ).values()
+        ),
+        stages: DEFAULT_STAGE_OPTIONS
+      };
+    }
+  });
+}
+
+export async function getOpportunityReferenceOptions(): Promise<Array<{ id: string; title: string; company: string }>> {
+  return getCachedQuery("references:opportunities", async () => {
+    const localPreviews = getLocalOpportunityPreviews();
+
+    try {
+      const { data, error } = await supabase
+        .from("opportunities")
+        .select("id, title, accounts:account_id(trade_name, legal_name)")
+        .order("created_at", { ascending: false })
+        .limit(REFERENCE_ITEMS_LIMIT);
+
+      if (error || !data) {
+        return localPreviews.map((item) => ({
+          id: item.id,
+          title: item.title,
+          company: item.company
+        }));
+      }
+
+      const remoteItems = data.map((item) => {
+        const account = pickOne(item.accounts);
+
+        return {
+          id: item.id,
+          title: item.title,
+          company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome"
+        };
+      });
+
+      const localItems = localPreviews.map((item) => ({
+        id: item.id,
+        title: item.title,
+        company: item.company
+      }));
+
+      return Array.from(new Map([...remoteItems, ...localItems].map((item) => [item.id, item])).values());
+    } catch {
+      return localPreviews.map((item) => ({
+        id: item.id,
+        title: item.title,
+        company: item.company
+      }));
+    }
+  });
 }
 
 export async function createCustomer(input: {
@@ -1666,7 +1795,7 @@ export async function updateCustomer(input: {
   return customerItem;
 }
 
-export async function deleteCustomer(input: { id: string; tradeName: string }): Promise<boolean> {
+export async function deleteCustomer(input: { id: string; tradeName: string }): Promise<{ ok: boolean; message: string }> {
   if (input.id.startsWith("local-customer-")) {
     removeLocalCustomer(input.id);
     await recordCrmActivity({
@@ -1678,13 +1807,36 @@ export async function deleteCustomer(input: { id: string; tradeName: string }): 
       kind: "note",
       forceLocal: true
     });
-    return true;
+    return { ok: true, message: "Cliente removido." };
+  }
+
+  const [contactsRes, opportunitiesRes, activitiesRes] = await Promise.all([
+    supabase.from("contacts").select("id", { count: "exact", head: true }).eq("account_id", input.id),
+    supabase.from("opportunities").select("id", { count: "exact", head: true }).eq("account_id", input.id),
+    supabase.from("activities").select("id", { count: "exact", head: true }).eq("account_id", input.id)
+  ]);
+
+  const contactCount = contactsRes.count ?? 0;
+  const opportunityCount = opportunitiesRes.count ?? 0;
+  const activityCount = activitiesRes.count ?? 0;
+
+  if (contactCount > 0 || opportunityCount > 0 || activityCount > 0) {
+    const dependencyLabels = [
+      contactCount ? `${contactCount} contato(s)` : null,
+      opportunityCount ? `${opportunityCount} oportunidade(s)` : null,
+      activityCount ? `${activityCount} atividade(s)` : null
+    ].filter(Boolean);
+
+    return {
+      ok: false,
+      message: `Exclusao bloqueada. Este cliente ainda possui ${dependencyLabels.join(", ")} vinculadas.`
+    };
   }
 
   const { error } = await supabase.from("accounts").delete().eq("id", input.id);
 
   if (error) {
-    return false;
+    return { ok: false, message: "Nao foi possivel excluir o cliente." };
   }
 
   removeLocalCustomer(input.id);
@@ -1699,7 +1851,7 @@ export async function deleteCustomer(input: { id: string; tradeName: string }): 
     forceLocal: !context
   });
 
-  return true;
+  return { ok: true, message: "Cliente excluido." };
 }
 
 export async function createOpportunity(input: {
@@ -1930,7 +2082,7 @@ export async function updateOpportunity(input: {
   return updatedItem;
 }
 
-export async function deleteOpportunity(input: { id: string; title: string }): Promise<boolean> {
+export async function deleteOpportunity(input: { id: string; title: string }): Promise<{ ok: boolean; message: string }> {
   if (input.id.startsWith("local-opportunity-")) {
     removeLocalOpportunityPreview(input.id);
     await recordCrmActivity({
@@ -1942,13 +2094,33 @@ export async function deleteOpportunity(input: { id: string; title: string }): P
       kind: "note",
       forceLocal: true
     });
-    return true;
+    return { ok: true, message: "Oportunidade removida." };
+  }
+
+  const [tasksRes, activitiesRes] = await Promise.all([
+    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("opportunity_id", input.id),
+    supabase.from("activities").select("id", { count: "exact", head: true }).eq("opportunity_id", input.id)
+  ]);
+
+  const taskCount = tasksRes.count ?? 0;
+  const activityCount = activitiesRes.count ?? 0;
+
+  if (taskCount > 0 || activityCount > 0) {
+    const dependencyLabels = [
+      taskCount ? `${taskCount} tarefa(s)` : null,
+      activityCount ? `${activityCount} atividade(s)` : null
+    ].filter(Boolean);
+
+    return {
+      ok: false,
+      message: `Exclusao bloqueada. Esta oportunidade ainda possui ${dependencyLabels.join(", ")} vinculadas.`
+    };
   }
 
   const { error } = await supabase.from("opportunities").delete().eq("id", input.id);
 
   if (error) {
-    return false;
+    return { ok: false, message: "Nao foi possivel excluir a oportunidade." };
   }
 
   removeLocalOpportunityPreview(input.id);
@@ -1963,7 +2135,7 @@ export async function deleteOpportunity(input: { id: string; title: string }): P
     forceLocal: !context
   });
 
-  return true;
+  return { ok: true, message: "Oportunidade excluida." };
 }
 
 export async function moveOpportunityToStage(input: {
@@ -2360,26 +2532,28 @@ export async function deleteAgendaEntry(input: { id: string; title: string }): P
 }
 
 export async function getAgendaEntries(): Promise<AgendaItem[]> {
-  const localAgenda = getLocalAgenda();
+  return getCachedQuery("agenda:list", async () => {
+    const localAgenda = getLocalAgenda();
 
-  try {
-    const { data, error } = await supabase
-      .from("activities")
-      .select(
-        "id, subject, notes, kind, scheduled_for, accounts:account_id(id, trade_name, legal_name), opportunities:opportunity_id(id, title)"
-      )
-      .not("scheduled_for", "is", null)
-      .order("scheduled_for", { ascending: true })
-      .limit(200);
+    try {
+      const { data, error } = await supabase
+        .from("activities")
+        .select(
+          "id, subject, notes, kind, scheduled_for, accounts:account_id(id, trade_name, legal_name), opportunities:opportunity_id(id, title)"
+        )
+        .not("scheduled_for", "is", null)
+        .order("scheduled_for", { ascending: true })
+        .limit(200);
 
-    if (error || !data) {
+      if (error || !data) {
+        return mergeAgendaItems(localAgenda, seedAgenda);
+      }
+
+      return mergeAgendaItems(localAgenda, data.map(mapAgendaItem));
+    } catch {
       return mergeAgendaItems(localAgenda, seedAgenda);
     }
-
-    return mergeAgendaItems(localAgenda, data.map(mapAgendaItem));
-  } catch {
-    return mergeAgendaItems(localAgenda, seedAgenda);
-  }
+  });
 }
 
 async function syncPersistedNotifications(

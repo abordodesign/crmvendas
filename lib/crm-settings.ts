@@ -32,6 +32,19 @@ export const defaultCrmSettings: CrmSettings = {
   }
 };
 
+type CurrentSettingsUserContext = {
+  userId: string;
+  organizationId: string;
+};
+
+const USER_CONTEXT_CACHE_TTL_MS = 5000;
+let currentUserContextCache:
+  | {
+      expiresAt: number;
+      promise: Promise<CurrentSettingsUserContext | null>;
+    }
+  | null = null;
+
 function getLocalSettings() {
   if (typeof window === "undefined") {
     return defaultCrmSettings;
@@ -69,49 +82,62 @@ function saveLocalSettings(settings: CrmSettings) {
 }
 
 async function getCurrentUserContext() {
-  const {
-    data: { session }
-  } = await supabase.auth.getSession();
-
-  const userId = session?.user?.id;
-
-  if (!userId) {
-    return null;
+  if (currentUserContextCache && currentUserContextCache.expiresAt > Date.now()) {
+    return currentUserContextCache.promise;
   }
 
-  async function fetchProfile() {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("organization_id")
-      .eq("id", userId)
-      .maybeSingle();
+  const promise = (async () => {
+    const {
+      data: { session }
+    } = await supabase.auth.getSession();
 
-    return profile;
-  }
+    const userId = session?.user?.id;
 
-  let profile = await fetchProfile();
-
-  if (!profile?.organization_id) {
-    try {
-      await fetch("/api/auth/bootstrap", {
-        method: "POST",
-        cache: "no-store"
-      });
-    } catch {
-      // O fallback local continua abaixo se o bootstrap nao responder.
+    if (!userId) {
+      return null;
     }
 
-    profile = await fetchProfile();
-  }
+    async function fetchProfile() {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("organization_id")
+        .eq("id", userId)
+        .maybeSingle();
 
-  if (!profile?.organization_id) {
-    return null;
-  }
+      return profile;
+    }
 
-  return {
-    userId,
-    organizationId: profile.organization_id
+    let profile = await fetchProfile();
+
+    if (!profile?.organization_id) {
+      try {
+        await fetch("/api/auth/bootstrap", {
+          method: "POST",
+          cache: "no-store"
+        });
+      } catch {
+        // O fallback local continua abaixo se o bootstrap nao responder.
+      }
+
+      profile = await fetchProfile();
+    }
+
+    if (!profile?.organization_id) {
+      return null;
+    }
+
+    return {
+      userId,
+      organizationId: profile.organization_id
+    };
+  })();
+
+  currentUserContextCache = {
+    expiresAt: Date.now() + USER_CONTEXT_CACHE_TTL_MS,
+    promise
   };
+
+  return promise;
 }
 
 export function notifyCrmSettingsChanged() {

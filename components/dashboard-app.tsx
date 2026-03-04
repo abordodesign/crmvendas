@@ -8,14 +8,14 @@ import {
   createAgendaEntry,
   deleteAgendaEntry,
   getDashboardData,
-  getOpportunities,
+  getOpportunityReferenceOptions,
   getReferenceOptions,
   moveOpportunityToStage,
   subscribeCrmDataChanged,
   updateAgendaEntry
 } from "@/lib/crm-data-source";
 import { seedDashboardData } from "@/lib/crm-seed";
-import type { DashboardData, OpportunityItem } from "@/types/crm-app";
+import type { DashboardData } from "@/types/crm-app";
 
 const FILTER_MODES = [
   { id: "all", label: "Todos" },
@@ -31,6 +31,13 @@ const SORT_MODES = [
   { id: "owner_asc", label: "Responsavel A-Z" },
   { id: "title_asc", label: "Servico A-Z" }
 ] as const;
+
+type AgendaOpportunityOption = {
+  id: string;
+  title: string;
+  company: string;
+};
+
 export function DashboardApp() {
   const [settings, setSettings] = useState(defaultCrmSettings);
   const [data, setData] = useState<DashboardData>(seedDashboardData);
@@ -52,7 +59,7 @@ export function DashboardApp() {
   const [agendaFilterToday, setAgendaFilterToday] = useState(true);
   const [agendaItemPendingDelete, setAgendaItemPendingDelete] = useState<DashboardData["agenda"][number] | null>(null);
   const [accountOptions, setAccountOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [opportunityOptions, setOpportunityOptions] = useState<OpportunityItem[]>([]);
+  const [opportunityOptions, setOpportunityOptions] = useState<AgendaOpportunityOption[]>([]);
   const [agendaAccountId, setAgendaAccountId] = useState("");
   const [agendaOpportunityId, setAgendaOpportunityId] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -64,7 +71,7 @@ export function DashboardApp() {
       const [nextData, refs, opportunities] = await Promise.all([
         getDashboardData(),
         getReferenceOptions(),
-        getOpportunities()
+        getOpportunityReferenceOptions()
       ]);
 
       if (isMounted) {
@@ -1010,7 +1017,7 @@ function AgendaFormModal({
   accountId: string;
   opportunityId: string;
   accounts: Array<{ id: string; label: string }>;
-  opportunities: OpportunityItem[];
+  opportunities: AgendaOpportunityOption[];
   onTitleChange: (value: string) => void;
   onNoteChange: (value: string) => void;
   onDateChange: (value: string) => void;

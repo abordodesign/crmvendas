@@ -9,6 +9,10 @@ import { seedCustomers } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
 import type { CustomerItem } from "@/types/crm-app";
 
+function upsertCustomer(items: CustomerItem[], nextItem: CustomerItem) {
+  return [nextItem, ...items.filter((item) => item.id !== nextItem.id)];
+}
+
 export function CustomersScreen() {
   const role = useCrmRole();
   const [customers, setCustomers] = useState<CustomerItem[]>(seedCustomers);
@@ -62,6 +66,10 @@ export function CustomersScreen() {
     event.preventDefault();
     setFeedback(null);
 
+    if (isPending) {
+      return;
+    }
+
     if (!canManageCustomers) {
       setFeedback("Seu perfil nao pode criar clientes.");
       return;
@@ -83,7 +91,7 @@ export function CustomersScreen() {
           document
         });
 
-        setCustomers((current) => [created, ...current]);
+        setCustomers((current) => upsertCustomer(current, created));
         resetForm();
         setFeedback("Cliente adicionado.");
       })();
@@ -139,6 +147,10 @@ export function CustomersScreen() {
       event.preventDefault();
       setFeedback(null);
 
+      if (isPending) {
+        return;
+      }
+
       if (!canManageCustomers) {
         setFeedback("Seu perfil nao pode editar clientes.");
         return;
@@ -161,19 +173,20 @@ export function CustomersScreen() {
             document
           });
 
-          setCustomers((current) =>
-            current.map((item) =>
-              item.id === editingId
-                ? {
-                    ...item,
-                    ...updated,
-                    contacts: item.contacts,
-                    owner: item.owner,
-                    status: item.status
-                  }
-                : item
-            )
-          );
+          setCustomers((current) => {
+            const existing = current.find((item) => item.id === editingId);
+            const merged = existing
+              ? {
+                  ...existing,
+                  ...updated,
+                  contacts: existing.contacts,
+                  owner: existing.owner,
+                  status: existing.status
+                }
+              : updated;
+
+            return upsertCustomer(current, merged);
+          });
           cancelEdit();
           setFeedback("Cliente atualizado.");
         })();
@@ -203,16 +216,16 @@ export function CustomersScreen() {
     startTransition(() => {
       void (async () => {
         const currentCustomer = customerPendingDelete;
-        const success = await deleteCustomer({
+        const result = await deleteCustomer({
           id: currentCustomer.id,
           tradeName: currentCustomer.tradeName
         });
 
-        if (success) {
+        if (result.ok) {
           setCustomers((current) => current.filter((item) => item.id !== currentCustomer.id));
-          setFeedback("Cliente excluido.");
+          setFeedback(result.message);
         } else {
-          setFeedback("Nao foi possivel excluir o cliente.");
+          setFeedback(result.message);
         }
 
         setCustomerPendingDelete(null);

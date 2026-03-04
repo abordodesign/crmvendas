@@ -234,6 +234,19 @@ export function CrmShell({
 
   useEffect(() => {
     let isMounted = true;
+    let timeoutId: number | null = null;
+
+    if (!settings.features.notifications_center) {
+      setNotifications([]);
+
+      return () => {
+        isMounted = false;
+
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+        }
+      };
+    }
 
     async function loadNotifications() {
       const next = await getNotificationItems();
@@ -243,16 +256,28 @@ export function CrmShell({
       }
     }
 
+    function scheduleNotificationsLoad() {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+
+      timeoutId = window.setTimeout(() => {
+        void loadNotifications();
+      }, 250);
+    }
+
     void loadNotifications();
-    const unsubscribe = subscribeCrmDataChanged(() => {
-      void loadNotifications();
-    });
+    const unsubscribe = subscribeCrmDataChanged(scheduleNotificationsLoad);
 
     return () => {
       isMounted = false;
       unsubscribe();
+
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
     };
-  }, []);
+  }, [settings.features.notifications_center]);
 
   if (authState.isLoading) {
     return (
