@@ -477,7 +477,7 @@ export function SettingsScreen() {
       </section>
 
       {isConfirmingReset ? (
-        <div style={modalOverlayStyle} onClick={() => setIsConfirmingReset(false)}>
+        <div style={modalOverlayStyle}>
           <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
             <div style={eyebrowStyle}>Confirmacao de limpeza</div>
             <h2 style={{ ...sectionTitleStyle, marginTop: 10 }}>Apagar dados operacionais do CRM?</h2>

@@ -449,7 +449,7 @@ function DeleteAgendaModal({
   }
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
+    <div style={overlayStyle}>
       <div style={confirmModalStyle} onClick={(event) => event.stopPropagation()}>
         <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
         <h2 style={modalTitleStyle}>Excluir compromisso?</h2>
@@ -632,7 +632,7 @@ function AgendaEditorModal({
   }
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
+    <div style={overlayStyle}>
       <div style={modalStyle} onClick={(event) => event.stopPropagation()}>
         <div style={toolbarStyle}>
           <div>

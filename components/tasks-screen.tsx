@@ -438,7 +438,7 @@ function DeleteTaskModal({
   }
 
   return (
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle}>
       <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
         <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
         <h2 style={modalTitleStyle}>Excluir tarefa?</h2>
@@ -599,7 +599,7 @@ function TaskFormModal({
   const priorityLabel = PRIORITY_OPTIONS.find((item) => item.id === priority)?.label ?? priority;
 
   return (
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
         <div style={modalHeaderStyle}>
           <div style={{ minWidth: 0 }}>

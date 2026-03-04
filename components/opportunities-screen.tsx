@@ -1270,7 +1270,7 @@ function OpportunityFormModal({
   }
 
   return (
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
         <div
           style={{
@@ -1569,7 +1569,7 @@ function DeleteOpportunityModal({
   }
 
   return (
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle}>
       <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
         <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
         <h2 style={confirmTitleStyle}>Excluir oportunidade?</h2>

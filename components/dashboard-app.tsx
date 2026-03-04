@@ -1034,7 +1034,7 @@ function AgendaFormModal({
   }
 
   return (
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle}>
       <div style={modalCardStyle} onClick={(event) => event.stopPropagation()}>
         <div
           style={{
@@ -1160,7 +1160,7 @@ function DeleteDashboardAgendaModal({
   }
 
   return (
-    <div style={modalOverlayStyle} onClick={onClose}>
+    <div style={modalOverlayStyle}>
       <div style={dashboardConfirmModalStyle} onClick={(event) => event.stopPropagation()}>
         <div style={dashboardConfirmEyebrowStyle}>Confirmar exclusao</div>
         <h2 style={agendaTitleStyle}>Excluir horario?</h2>

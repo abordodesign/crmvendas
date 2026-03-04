@@ -38,7 +38,7 @@ export function CustomerFormModal({
   }
 
   return (
-    <div style={overlayStyle} onClick={onClose}>
+    <div style={overlayStyle}>
       <div style={modalStyle} onClick={(event) => event.stopPropagation()}>
         <div style={headerStyle}>
           <div style={{ minWidth: 0 }}>
