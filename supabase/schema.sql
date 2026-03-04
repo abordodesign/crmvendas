@@ -25,7 +25,17 @@ create table if not exists public.accounts (
   legal_name text not null,
   trade_name text,
   segment text,
+  primary_contact_name text,
+  phone text,
+  email text,
+  address text,
+  city text,
+  state text,
+  zip_code text,
+  document text,
+  status text not null default 'active',
   owner_id uuid references public.profiles(id),
+  updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
 );
 
@@ -78,6 +88,24 @@ alter table public.opportunities
 alter table public.opportunities
   add column if not exists months integer not null default 1;
 
+alter table public.accounts
+  add column if not exists primary_contact_name text,
+  add column if not exists phone text,
+  add column if not exists email text,
+  add column if not exists address text,
+  add column if not exists city text,
+  add column if not exists state text,
+  add column if not exists zip_code text,
+  add column if not exists document text,
+  add column if not exists status text not null default 'active',
+  add column if not exists updated_at timestamptz not null default now();
+
+alter table public.opportunities
+  add column if not exists next_step text,
+  add column if not exists conclusion_status text,
+  add column if not exists conclusion_reason text,
+  add column if not exists concluded_at timestamptz;
+
 create table if not exists public.activities (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations on delete cascade,
@@ -99,10 +127,14 @@ create table if not exists public.tasks (
   opportunity_id uuid references public.opportunities on delete cascade,
   owner_id uuid not null references public.profiles(id),
   title text not null,
+  priority text not null default 'Media',
   due_at timestamptz,
   is_done boolean not null default false,
   created_at timestamptz not null default now()
 );
+
+alter table public.tasks
+  add column if not exists priority text not null default 'Media';
 
 create table if not exists public.app_settings (
   id uuid primary key default gen_random_uuid(),

@@ -451,6 +451,65 @@ function currency(value: number | null | undefined) {
   }).format(value);
 }
 
+function mapDbOpportunityStatusToUi(value: string | null | undefined) {
+  if (!value) {
+    return "Em andamento";
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "won") {
+    return "Conquistado";
+  }
+
+  if (normalized === "lost") {
+    return "Perdido";
+  }
+
+  return "Em andamento";
+}
+
+function mapUiOpportunityStatusToDb(value: string | null | undefined): "open" | "won" | "lost" {
+  if (!value) {
+    return "open";
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized.includes("conquist") || normalized === "won") {
+    return "won";
+  }
+
+  if (
+    normalized.includes("perd") ||
+    normalized.includes("cancel") ||
+    normalized.includes("suspens") ||
+    normalized === "lost"
+  ) {
+    return "lost";
+  }
+
+  return "open";
+}
+
+function mapAccountStatusToUi(value: string | null | undefined) {
+  if (!value) {
+    return "Ativo";
+  }
+
+  const normalized = value.trim().toLowerCase();
+
+  if (normalized === "active" || normalized === "ativo") {
+    return "Ativo";
+  }
+
+  if (normalized === "inactive" || normalized === "inativo") {
+    return "Inativo";
+  }
+
+  return value;
+}
+
 function formatDate(date: string | null | undefined) {
   if (!date) {
     return "Sem data";
@@ -1095,7 +1154,9 @@ export async function getCustomers(): Promise<CustomerItem[]> {
   try {
     const { data, error } = await supabase
       .from("accounts")
-      .select("id, legal_name, trade_name, segment, owner_id, contacts(id), profiles:owner_id(full_name)")
+      .select(
+        "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, owner_id, contacts(id), profiles:owner_id(full_name)"
+      )
       .order("created_at", { ascending: false });
 
     if (error || !data) {
@@ -1111,17 +1172,17 @@ export async function getCustomers(): Promise<CustomerItem[]> {
         legalName: account.legal_name ?? "Sem razao social",
         tradeName: account.trade_name ?? account.legal_name ?? "Sem nome fantasia",
         segment: account.segment ?? "Nao informado",
-        companyContactName: "",
-        phone: "",
-        email: "",
-        address: "",
-        city: "",
-        state: "",
-        zipCode: "",
-        document: "",
+        companyContactName: account.primary_contact_name ?? "",
+        phone: account.phone ?? "",
+        email: account.email ?? "",
+        address: account.address ?? "",
+        city: account.city ?? "",
+        state: account.state ?? "",
+        zipCode: account.zip_code ?? "",
+        document: account.document ?? "",
         owner: resolveCurrentUserLabel(currentContext, account.owner_id, owner?.full_name ?? "Sem responsavel"),
         contacts,
-        status: "Ativo"
+        status: mapAccountStatusToUi(account.status)
       };
     });
 
@@ -1139,7 +1200,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
     const { data, error } = await supabase
       .from("opportunities")
       .select(
-        "id, title, amount, base_amount, is_recurring, months, owner_id, status, expected_close_date, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+        "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
       )
       .order("created_at", { ascending: false });
 
@@ -1158,13 +1219,16 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
         company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
         stage: stage?.name ?? "Sem etapa",
         owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
-        nextStep: "Atualizar proximo passo",
+        nextStep: opportunity.next_step ?? "Atualizar proximo passo",
         baseAmount: currency(opportunity.base_amount),
         isRecurring: Boolean(opportunity.is_recurring),
         months: opportunity.months ?? 1,
         amount: currency(opportunity.amount),
         expectedCloseDate: formatDate(opportunity.expected_close_date),
-        status: opportunity.status ?? "Em andamento"
+        status: mapDbOpportunityStatusToUi(opportunity.status),
+        conclusionStatus: opportunity.conclusion_status ?? undefined,
+        conclusionReason: opportunity.conclusion_reason ?? undefined,
+        concludedAt: opportunity.concluded_at ?? undefined
       };
     });
 
@@ -1179,7 +1243,7 @@ export async function getTasks(): Promise<TaskItem[]> {
     const { data, error } = await supabase
       .from("tasks")
       .select(
-        "id, title, due_at, opportunities:opportunity_id(accounts:account_id(trade_name, legal_name), title)"
+        "id, title, due_at, priority, opportunities:opportunity_id(accounts:account_id(trade_name, legal_name), title)"
       )
       .order("due_at", { ascending: true });
 
@@ -1196,7 +1260,7 @@ export async function getTasks(): Promise<TaskItem[]> {
         title: task.title,
         company: account?.trade_name ?? account?.legal_name ?? opportunity?.title ?? "Sem conta",
         due: formatDateTime(task.due_at),
-        priority: "Media",
+        priority: task.priority ?? "Media",
         dueDate: toDateInput(task.due_at),
         dueTime: toTimeInput(task.due_at)
       };
@@ -1426,9 +1490,19 @@ export async function createCustomer(input: {
       legal_name: input.legalName,
       trade_name: input.tradeName || null,
       segment: input.segment || null,
+      primary_contact_name: input.companyContactName || null,
+      phone: input.phone || null,
+      email: input.email || null,
+      address: input.address || null,
+      city: input.city || null,
+      state: input.state || null,
+      zip_code: input.zipCode || null,
+      document: input.document || null,
       owner_id: context.userId
     })
-    .select("id, legal_name, trade_name, segment")
+    .select(
+      "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status"
+    )
     .single();
 
   if (error || !data) {
@@ -1441,17 +1515,17 @@ export async function createCustomer(input: {
     legalName: data.legal_name,
     tradeName: data.trade_name ?? data.legal_name,
     segment: data.segment ?? "Nao informado",
-    companyContactName: input.companyContactName,
-    phone: input.phone,
-    email: input.email,
-    address: input.address,
-    city: input.city,
-    state: input.state,
-    zipCode: input.zipCode,
-    document: input.document,
+    companyContactName: data.primary_contact_name ?? "",
+    phone: data.phone ?? "",
+    email: data.email ?? "",
+    address: data.address ?? "",
+    city: data.city ?? "",
+    state: data.state ?? "",
+    zipCode: data.zip_code ?? "",
+    document: data.document ?? "",
     owner: context.fullName,
     contacts: 0,
-    status: "Ativo"
+    status: mapAccountStatusToUi(data.status)
   };
 
   saveLocalCustomer(customerItem);
@@ -1520,10 +1594,20 @@ export async function updateCustomer(input: {
     .update({
       legal_name: input.legalName,
       trade_name: input.tradeName || null,
-      segment: input.segment || null
+      segment: input.segment || null,
+      primary_contact_name: input.companyContactName || null,
+      phone: input.phone || null,
+      email: input.email || null,
+      address: input.address || null,
+      city: input.city || null,
+      state: input.state || null,
+      zip_code: input.zipCode || null,
+      document: input.document || null
     })
     .eq("id", input.id)
-    .select("id, legal_name, trade_name, segment")
+    .select(
+      "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status"
+    )
     .single();
 
   if (error || !data) {
@@ -1536,17 +1620,17 @@ export async function updateCustomer(input: {
     legalName: data.legal_name,
     tradeName: data.trade_name ?? data.legal_name,
     segment: data.segment ?? "Nao informado",
-    companyContactName: input.companyContactName,
-    phone: input.phone,
-    email: input.email,
-    address: input.address,
-    city: input.city,
-    state: input.state,
-    zipCode: input.zipCode,
-    document: input.document,
+    companyContactName: data.primary_contact_name ?? "",
+    phone: data.phone ?? "",
+    email: data.email ?? "",
+    address: data.address ?? "",
+    city: data.city ?? "",
+    state: data.state ?? "",
+    zipCode: data.zip_code ?? "",
+    document: data.document ?? "",
     owner: context.fullName,
     contacts: 0,
-    status: "Ativo"
+    status: mapAccountStatusToUi(data.status)
   };
 
   saveLocalCustomer(customerItem);
@@ -1621,14 +1705,19 @@ export async function createOpportunity(input: {
       stage_id: input.stageId,
       owner_id: context.userId,
       title: input.title,
+      status: mapUiOpportunityStatusToDb(input.status),
+      next_step: input.nextStep || null,
       base_amount: input.baseAmount,
       is_recurring: input.isRecurring,
       months: input.months,
       amount: input.amount,
-      expected_close_date: input.expectedCloseDate || null
+      expected_close_date: input.expectedCloseDate || null,
+      conclusion_status: input.conclusionStatus || null,
+      conclusion_reason: input.conclusionReason || null,
+      concluded_at: input.concludedAt || null
     })
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, expected_close_date, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -1646,16 +1735,16 @@ export async function createOpportunity(input: {
     company: account?.trade_name ?? account?.legal_name ?? "Conta sem nome",
     stage: stage?.name ?? "Sem etapa",
     owner: context.fullName,
-    nextStep: input.nextStep,
+    nextStep: data.next_step ?? undefined,
     baseAmount: currency(data.base_amount),
     isRecurring: Boolean(data.is_recurring),
     months: data.months ?? input.months,
     amount: currency(data.amount),
     expectedCloseDate: formatDate(data.expected_close_date),
-    status: input.status ?? data.status ?? "Em andamento",
-    conclusionStatus: input.conclusionStatus,
-    conclusionReason: input.conclusionReason,
-    concludedAt: input.concludedAt
+    status: mapDbOpportunityStatusToUi(data.status),
+    conclusionStatus: data.conclusion_status ?? undefined,
+    conclusionReason: data.conclusion_reason ?? undefined,
+    concludedAt: data.concluded_at ?? undefined
   };
 
   await recordCrmActivity({
@@ -1729,15 +1818,20 @@ export async function updateOpportunity(input: {
     .update({
       title: input.title,
       stage_id: input.stageId || undefined,
+      status: mapUiOpportunityStatusToDb(input.status),
+      next_step: input.nextStep || null,
       base_amount: input.baseAmount,
       is_recurring: input.isRecurring,
       months: input.months,
       amount: input.amount,
-      expected_close_date: input.expectedCloseDate || null
+      expected_close_date: input.expectedCloseDate || null,
+      conclusion_status: input.conclusionStatus || null,
+      conclusion_reason: input.conclusionReason || null,
+      concluded_at: input.concludedAt || null
     })
     .eq("id", input.id)
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, expected_close_date, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, pipeline_stages:stage_id(name), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -1755,16 +1849,16 @@ export async function updateOpportunity(input: {
     company: account?.trade_name ?? account?.legal_name ?? input.currentCompany,
     stage: input.stageLabel ?? stage?.name ?? input.currentStage,
     owner: context.fullName,
-    nextStep: input.nextStep,
+    nextStep: data.next_step ?? undefined,
     baseAmount: currency(data.base_amount),
     isRecurring: Boolean(data.is_recurring),
     months: data.months ?? input.months,
     amount: currency(data.amount),
     expectedCloseDate: formatDate(data.expected_close_date),
-    status: input.status ?? data.status ?? "Em andamento",
-    conclusionStatus: input.conclusionStatus,
-    conclusionReason: input.conclusionReason,
-    concludedAt: input.concludedAt
+    status: mapDbOpportunityStatusToUi(data.status),
+    conclusionStatus: data.conclusion_status ?? undefined,
+    conclusionReason: data.conclusion_reason ?? undefined,
+    concludedAt: data.concluded_at ?? undefined
   };
 
   await recordCrmActivity({
@@ -1859,7 +1953,8 @@ export async function moveOpportunityToStage(input: {
   const { error } = await supabase
     .from("opportunities")
     .update({
-      stage_id: stageRow.id
+      stage_id: stageRow.id,
+      concluded_at: nextItem.concludedAt ?? null
     })
     .eq("id", input.opportunityId);
 
@@ -2527,9 +2622,10 @@ export async function createTask(input: {
       opportunity_id: input.opportunityId || null,
       owner_id: context.userId,
       title: input.title,
+      priority: input.priority,
       due_at: dueAt || null
     })
-    .select("id, title, due_at")
+    .select("id, title, due_at, priority")
     .single();
 
   if (error || !data) {
@@ -2541,7 +2637,7 @@ export async function createTask(input: {
     title: data.title,
     company: input.companyLabel ?? "Sem conta",
     due: formatDateTime(data.due_at),
-    priority: input.priority,
+    priority: data.priority ?? input.priority,
     dueDate: toDateInput(data.due_at),
     dueTime: toTimeInput(data.due_at)
   };
@@ -2595,10 +2691,11 @@ export async function updateTask(input: {
     .from("tasks")
     .update({
       title: input.title,
+      priority: input.priority,
       due_at: dueAt || null
     })
     .eq("id", input.id)
-    .select("id, title, due_at")
+    .select("id, title, due_at, priority")
     .single();
 
   if (error || !data) {
@@ -2610,7 +2707,7 @@ export async function updateTask(input: {
     title: data.title,
     company: input.companyLabel ?? "Sem conta",
     due: formatDateTime(data.due_at),
-    priority: input.priority,
+    priority: data.priority ?? input.priority,
     dueDate: toDateInput(data.due_at),
     dueTime: toTimeInput(data.due_at)
   };
