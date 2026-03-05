@@ -22,6 +22,7 @@ type CrmShellProps = {
     | "/dashboard"
     | "/dashboard/statistics"
     | "/dashboard/prospecting"
+    | "/dashboard/prospecting-free"
     | "/dashboard/agenda"
     | "/dashboard/customers"
     | "/dashboard/opportunities"
@@ -35,10 +36,28 @@ type CrmShellProps = {
   children: React.ReactNode;
 };
 
-const navItems = [
+type NavItem = {
+  href:
+    | "/dashboard"
+    | "/dashboard/statistics"
+    | "/dashboard/prospecting"
+    | "/dashboard/prospecting-free"
+    | "/dashboard/agenda"
+    | "/dashboard/customers"
+    | "/dashboard/opportunities"
+    | "/dashboard/tasks"
+    | "/dashboard/notifications"
+    | "/dashboard/settings"
+    | "/dashboard/history";
+  label: string;
+};
+
+const isGooglePlacesProspectingEnabled = process.env.NEXT_PUBLIC_ENABLE_GOOGLE_PLACES_PROSPECTING === "true";
+
+const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/dashboard/statistics", label: "Estatisticas" },
-  { href: "/dashboard/prospecting", label: "Prospeccao" },
+  { href: "/dashboard/prospecting-free", label: "Prospeccao Gratis" },
   { href: "/dashboard/agenda", label: "Agenda" },
   { href: "/dashboard/customers", label: "Clientes" },
   { href: "/dashboard/opportunities", label: "Oportunidades" },
@@ -46,7 +65,11 @@ const navItems = [
   { href: "/dashboard/notifications", label: "Notificacoes" },
   { href: "/dashboard/settings", label: "Configuracoes" },
   { href: "/dashboard/history", label: "Historico" }
-] as const;
+];
+
+if (isGooglePlacesProspectingEnabled) {
+  navItems.splice(3, 0, { href: "/dashboard/prospecting", label: "Prospeccao Google" });
+}
 
 const notificationModuleOptions = [
   { id: "all", label: "Todos" },
