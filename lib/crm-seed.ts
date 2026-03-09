@@ -13,6 +13,7 @@ export const seedKpis: KpiCard[] = [
   { label: "Pipeline total", value: "R$ 0,00", trend: "Nenhuma oportunidade cadastrada" },
   { label: "Ticket medio", value: "R$ 0,00", trend: "Sem base para calculo" },
   { label: "Receita recorrente", value: "R$ 0,00", trend: "Sem contratos recorrentes" },
+  { label: "Receita do mes", value: "R$ 0,00", trend: "Sem negocios fechados neste mes" },
   { label: "Tarefas em aberto", value: "0", trend: "Sem tarefas cadastradas" }
 ];
 

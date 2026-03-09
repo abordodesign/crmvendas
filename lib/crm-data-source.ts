@@ -699,6 +699,25 @@ function isSameMonth(date: Date, reference: Date) {
   return date.getFullYear() === reference.getFullYear() && date.getMonth() === reference.getMonth();
 }
 
+function getClosedRevenueThisMonth(items: OpportunityItem[], referenceDate = new Date()) {
+  return items.reduce((sum, item) => {
+    if (mapUiOpportunityStatusToDb(item.status) !== "won") {
+      return sum;
+    }
+
+    if (!item.concludedAt) {
+      return sum;
+    }
+
+    const concludedAt = new Date(item.concludedAt);
+    if (Number.isNaN(concludedAt.getTime()) || !isSameMonth(concludedAt, referenceDate)) {
+      return sum;
+    }
+
+    return sum + amountLabelToNumber(item.amount);
+  }, 0);
+}
+
 function stageProgressIndex(stage: string) {
   const normalized = normalizeStageLabel(stage);
   const index = STAGE_PROGRESS_ORDER.indexOf(normalized as (typeof STAGE_PROGRESS_ORDER)[number]);
@@ -1356,7 +1375,7 @@ export async function getDashboardData(): Promise<DashboardData> {
       supabase
         .from("opportunities")
         .select(
-          "id, title, amount, base_amount, is_recurring, months, stage_id, owner_id, status, expected_close_date, accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+          "id, title, amount, base_amount, is_recurring, months, stage_id, owner_id, status, expected_close_date, concluded_at, accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
         .order("created_at", { ascending: false })
         .limit(DASHBOARD_PIPELINE_LIMIT),
@@ -1402,6 +1421,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         const recurringTotal = merged
           .filter((item) => item.isRecurring)
           .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+        const monthRevenue = getClosedRevenueThisMonth(merged);
         const averageTicket = merged.length ? totalPipeline / merged.length : 0;
 
         return {
@@ -1414,7 +1434,16 @@ export async function getDashboardData(): Promise<DashboardData> {
               value: currency(recurringTotal),
               trend: recurringTotal ? "Contratos recorrentes no funil" : "Sem contratos recorrentes"
             },
-            seedDashboardData.kpis[3]
+            {
+              label: "Receita do mes",
+              value: currency(monthRevenue),
+              trend: monthRevenue ? "Negocios fechados no mes atual" : "Sem negocios fechados neste mes"
+            },
+            seedDashboardData.kpis.find((item) => item.label === "Tarefas em aberto") ?? {
+              label: "Tarefas em aberto",
+              value: "0",
+              trend: "Sem tarefas cadastradas"
+            }
           ],
           pipeline,
           agenda: mergeAgendaItems(localAgenda, seedAgenda).slice(0, 6),
@@ -1566,7 +1595,8 @@ export async function getDashboardData(): Promise<DashboardData> {
           probability: Math.max(0, Math.min(100, DEFAULT_STAGE_PROBABILITIES[stage] ?? 0)),
           manualProbability: undefined,
           expectedCloseDate: formatDate(opportunity.expected_close_date),
-          status: mapDbOpportunityStatusToUi(opportunity.status)
+          status: mapDbOpportunityStatusToUi(opportunity.status),
+          concludedAt: opportunity.concluded_at ?? undefined
         };
       }) ?? [];
 
@@ -1576,6 +1606,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     const recurringTotal = mergedOpportunities
       .filter((item) => item.isRecurring)
       .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+    const monthRevenue = getClosedRevenueThisMonth(mergedOpportunities);
     const averageTicket = mergedOpportunities.length ? mergedTotal / mergedOpportunities.length : 0;
 
     return {
@@ -1596,6 +1627,11 @@ export async function getDashboardData(): Promise<DashboardData> {
           trend: mergedOpportunities.some((item) => item.isRecurring)
             ? "Contratos recorrentes no funil"
             : "Sem contratos recorrentes"
+        },
+        {
+          label: "Receita do mes",
+          value: currency(monthRevenue),
+          trend: monthRevenue ? "Negocios fechados no mes atual" : "Sem negocios fechados neste mes"
         },
         {
           label: "Tarefas em aberto",
