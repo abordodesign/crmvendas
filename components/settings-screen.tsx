@@ -54,6 +54,11 @@ const featureDefinitions: Array<{
     key: "history_module",
     title: "Historico e auditoria",
     description: "Mantem o menu Historico e o rastreio de movimentacoes do sistema."
+  },
+  {
+    key: "pipeline_agent_system",
+    title: "Agente de pipeline",
+    description: "Habilita analise de atencao, alertas inteligentes e automacoes do agente comercial."
   }
 ];
 
@@ -136,6 +141,10 @@ export function SettingsScreen() {
       features: {
         ...draftSettings.features,
         [key]: checked
+      },
+      pipelineAgent: {
+        ...draftSettings.pipelineAgent,
+        enabled: key === "pipeline_agent_system" ? (checked ? draftSettings.pipelineAgent.enabled : false) : draftSettings.pipelineAgent.enabled
       }
     };
 

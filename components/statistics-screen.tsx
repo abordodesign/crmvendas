@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CrmShell } from "@/components/crm-shell";
 import { getPipelineAttention, getPipelineStatistics, runPipelineAttentionAgent } from "@/lib/crm-data-source";
+import { defaultCrmSettings, getCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
 import type { PipelineAttentionData, PipelineAttentionItem, PipelineStatistics } from "@/types/crm-app";
 
 const periodOptions = [
@@ -45,11 +46,34 @@ const emptyAttention: PipelineAttentionData = {
 export function StatisticsScreen() {
   const [stats, setStats] = useState<PipelineStatistics>(emptyStatistics);
   const [attention, setAttention] = useState<PipelineAttentionData>(emptyAttention);
+  const [settings, setSettings] = useState(defaultCrmSettings);
   const [periodId, setPeriodId] = useState<(typeof periodOptions)[number]["id"]>("30d");
   const activePeriod = periodOptions.find((item) => item.id === periodId) ?? periodOptions[0];
 
   useEffect(() => {
     void runPipelineAttentionAgent();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadSettings() {
+      const next = await getCrmSettings();
+
+      if (isMounted) {
+        setSettings(next);
+      }
+    }
+
+    void loadSettings();
+    const unsubscribe = subscribeCrmSettingsChanged(() => {
+      void loadSettings();
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -130,6 +154,7 @@ export function StatisticsScreen() {
         </div>
       </section>
 
+      {settings.features.pipeline_agent_system ? (
       <section style={panelStyle}>
         <div style={sectionHeaderStyle}>
           <div>
@@ -161,6 +186,7 @@ export function StatisticsScreen() {
           />
         </div>
       </section>
+      ) : null}
 
       <section style={panelStyle}>
         <div style={sectionHeaderStyle}>

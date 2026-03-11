@@ -1159,6 +1159,15 @@ async function getLatestOpportunityActivities(opportunityIds: string[]) {
 export async function getPipelineAttention(limit = 15): Promise<PipelineAttentionData> {
   return getCachedQuery(`pipeline:attention:${limit}`, async () => {
     const [opportunities, tasks, settings] = await Promise.all([getOpportunities(), getTasks(), getCrmSettings()]);
+
+    if (!settings.features.pipeline_agent_system) {
+      return {
+        generatedAt: new Date().toISOString(),
+        summary: { critical: 0, high: 0, medium: 0, low: 0, monitored: 0 },
+        items: []
+      };
+    }
+
     const openOpportunities = opportunities.filter(
       (item) => mapUiOpportunityStatusToDb(item.status) === "open" && !isConclusionStage(item.stage)
     );
@@ -1367,12 +1376,16 @@ export async function runPipelineAttentionAgent(): Promise<{
     };
   }
 
-  if (!settings.pipelineAgent.enabled || !hasReachedRunTime(settings.pipelineAgent.runAt)) {
+  if (!settings.features.pipeline_agent_system || !settings.pipelineAgent.enabled || !hasReachedRunTime(settings.pipelineAgent.runAt)) {
     return await finish({
       executed: false,
       createdTasks: 0,
       reviewed: attention.items.length,
-      reason: !settings.pipelineAgent.enabled ? "Agente desativado nas configuracoes." : "Aguardando horario configurado."
+      reason: !settings.features.pipeline_agent_system
+        ? "Sistema do agente desativado nas feature flags."
+        : !settings.pipelineAgent.enabled
+          ? "Agente desativado nas configuracoes."
+          : "Aguardando horario configurado."
     });
   }
 
@@ -3896,7 +3909,9 @@ export async function getNotificationItems(): Promise<NotificationItem[]> {
     tasks: settings.features.task_reminders ? tasks : [],
     opportunities
     }),
-    ...(settings.pipelineAgent.enabled ? buildPipelineAttentionNotificationRules(attention) : [])
+    ...(settings.features.pipeline_agent_system && settings.pipelineAgent.enabled
+      ? buildPipelineAttentionNotificationRules(attention)
+      : [])
   ].slice(0, 16);
   const items = await syncPersistedNotifications(drafts, context);
 
@@ -4011,7 +4026,9 @@ export async function getNotificationCenterItems(): Promise<StoredNotification[]
     tasks: settings.features.task_reminders ? tasks : [],
     opportunities
     }),
-    ...(settings.pipelineAgent.enabled ? buildPipelineAttentionNotificationRules(attention) : [])
+    ...(settings.features.pipeline_agent_system && settings.pipelineAgent.enabled
+      ? buildPipelineAttentionNotificationRules(attention)
+      : [])
   ].slice(0, 16);
   await syncPersistedNotifications(drafts, context);
 

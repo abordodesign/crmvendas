@@ -434,78 +434,6 @@ export function DashboardApp() {
         ))}
       </section>
 
-      <section
-        style={{
-          padding: 18,
-          borderRadius: 24,
-          background: "#ffffff",
-          border: "1px solid var(--line)",
-          display: "grid",
-          gap: 12
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <div>
-            <div
-              style={{
-                color: "var(--muted)",
-                fontSize: 10,
-                fontWeight: 800,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase"
-              }}
-            >
-              Agente comercial
-            </div>
-            <h2 style={{ margin: "8px 0 0", fontSize: "1.1rem" }}>Top prioridades do dia</h2>
-          </div>
-          <Link href="/dashboard/statistics" style={{ ...pillStyle, textDecoration: "none" }}>
-            Ver radar completo
-          </Link>
-        </div>
-
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <span style={attentionChipStyle("critical")}>Criticos: {attention.summary.critical}</span>
-          <span style={attentionChipStyle("high")}>Altos: {attention.summary.high}</span>
-          <span style={attentionChipStyle("medium")}>Medios: {attention.summary.medium}</span>
-          <span style={attentionChipStyle("low")}>Baixos: {attention.summary.low}</span>
-        </div>
-
-        <div style={{ display: "grid", gap: 10 }}>
-          {attention.items.length ? (
-            attention.items.slice(0, 5).map((item) => (
-              <article
-                key={item.opportunityId}
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: 14,
-                  border: "1px solid var(--line)",
-                  display: "grid",
-                  gap: 6
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 900, letterSpacing: "-0.02em" }}>{item.title}</div>
-                  <span style={attentionChipStyle(item.level)}>Score {item.attentionScore}</span>
-                </div>
-                <div style={{ color: "var(--muted)", fontSize: 13 }}>
-                  {item.company} • {item.stage}
-                </div>
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>{item.recommendedAction}</div>
-                <div>
-                  <Link href={item.href} style={{ color: "var(--accent)", fontWeight: 800, fontSize: 12 }}>
-                    Abrir negocio
-                  </Link>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div style={{ color: "var(--muted)", fontSize: 13 }}>
-              Sem alertas no momento. O agente segue monitorando o pipeline.
-            </div>
-          )}
-        </div>
-      </section>
 
       <section
         style={{
@@ -1074,6 +1002,82 @@ export function DashboardApp() {
           ))}
         </div>
       </section>
+
+      {settings.features.pipeline_agent_system ? (
+      <section
+        style={{
+          padding: 18,
+          borderRadius: 24,
+          background: "#ffffff",
+          border: "1px solid var(--line)",
+          display: "grid",
+          gap: 12
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div
+              style={{
+                color: "var(--muted)",
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase"
+              }}
+            >
+              Agente comercial
+            </div>
+            <h2 style={{ margin: "8px 0 0", fontSize: "1.1rem" }}>Top prioridades do dia</h2>
+          </div>
+          <Link href="/dashboard/statistics" style={{ ...pillStyle, textDecoration: "none" }}>
+            Ver radar completo
+          </Link>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span style={attentionChipStyle("critical")}>Criticos: {attention.summary.critical}</span>
+          <span style={attentionChipStyle("high")}>Altos: {attention.summary.high}</span>
+          <span style={attentionChipStyle("medium")}>Medios: {attention.summary.medium}</span>
+          <span style={attentionChipStyle("low")}>Baixos: {attention.summary.low}</span>
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          {attention.items.length ? (
+            attention.items.slice(0, 5).map((item) => (
+              <article
+                key={item.opportunityId}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  border: "1px solid var(--line)",
+                  display: "grid",
+                  gap: 6
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 900, letterSpacing: "-0.02em" }}>{item.title}</div>
+                  <span style={attentionChipStyle(item.level)}>Score {item.attentionScore}</span>
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                  {item.company} • {item.stage}
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>{item.recommendedAction}</div>
+                <div>
+                  <Link href={item.href} style={{ color: "var(--accent)", fontWeight: 800, fontSize: 12 }}>
+                    Abrir negocio
+                  </Link>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>
+              Sem alertas no momento. O agente segue monitorando o pipeline.
+            </div>
+          )}
+        </div>
+      </section>
+      ) : null}
+
     </CrmShell>
   );
 }

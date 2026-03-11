@@ -8,7 +8,8 @@ export type FeatureKey =
   | "agenda_module"
   | "task_reminders"
   | "pipeline_drag_drop"
-  | "history_module";
+  | "history_module"
+  | "pipeline_agent_system";
 
 export type SupportedLocale = "pt-BR" | "en-US" | "es-ES";
 export type SupportedTimeZone = "system" | "America/Sao_Paulo" | "America/New_York" | "UTC";
@@ -114,7 +115,8 @@ export const defaultCrmSettings: CrmSettings = {
     agenda_module: true,
     task_reminders: true,
     pipeline_drag_drop: true,
-    history_module: true
+    history_module: true,
+    pipeline_agent_system: true
   },
   pipelineAgent: parsePipelineAgentSettings(null)
 };
