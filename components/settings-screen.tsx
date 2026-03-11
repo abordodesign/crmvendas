@@ -126,7 +126,7 @@ export function SettingsScreen() {
   }, []);
 
   const activeFeatureCount = useMemo(
-    () => Object.values(draftSettings.features).filter(Boolean).length,
+    () => featureDefinitions.filter((feature) => Boolean(draftSettings.features[feature.key])).length,
     [draftSettings.features]
   );
 
