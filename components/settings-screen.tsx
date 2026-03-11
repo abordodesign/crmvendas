@@ -20,6 +20,14 @@ import {
 } from "@/lib/crm-settings";
 import { useCrmRole } from "@/lib/use-crm-role";
 
+type TeamMemberListItem = {
+  id: string;
+  fullName: string;
+  email: string;
+  role: "admin" | "manager" | "sales" | "viewer";
+  createdAt?: string;
+};
+
 const featureDefinitions: Array<{
   key: FeatureKey;
   title: string;
@@ -86,6 +94,9 @@ export function SettingsScreen() {
   const [teamMemberEmail, setTeamMemberEmail] = useState("");
   const [teamMemberPassword, setTeamMemberPassword] = useState("");
   const [teamMemberRole, setTeamMemberRole] = useState<"admin" | "manager" | "sales" | "viewer">("sales");
+  const [teamMembers, setTeamMembers] = useState<TeamMemberListItem[]>([]);
+  const [isLoadingTeamMembers, setIsLoadingTeamMembers] = useState(false);
+  const [teamMemberActionId, setTeamMemberActionId] = useState<string | null>(null);
   const [isCreatingTeamMember, setIsCreatingTeamMember] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
@@ -124,6 +135,45 @@ export function SettingsScreen() {
       isMounted = false;
     };
   }, []);
+
+  async function loadTeamMembers() {
+    if (role !== "admin") {
+      setTeamMembers([]);
+      return;
+    }
+
+    setIsLoadingTeamMembers(true);
+
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "GET",
+        cache: "no-store"
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        message?: string;
+        users?: TeamMemberListItem[];
+      };
+
+      if (!response.ok || !result.ok || !Array.isArray(result.users)) {
+        setFeedback(result.message || "Nao foi possivel carregar usuarios da equipe.");
+        setIsLoadingTeamMembers(false);
+        return;
+      }
+
+      setTeamMembers(result.users);
+    } catch {
+      setFeedback("Falha ao carregar a lista de usuarios da equipe.");
+    } finally {
+      setIsLoadingTeamMembers(false);
+    }
+  }
+
+  useEffect(() => {
+    if (role === "admin") {
+      void loadTeamMembers();
+    }
+  }, [role]);
 
   const activeFeatureCount = useMemo(
     () => featureDefinitions.filter((feature) => Boolean(draftSettings.features[feature.key])).length,
@@ -242,6 +292,7 @@ export function SettingsScreen() {
       setTeamMemberPassword("");
       setTeamMemberRole("sales");
       setFeedback("Usuario da equipe criado com sucesso.");
+      await loadTeamMembers();
     } catch {
       setFeedback("Falha ao comunicar com o servidor para criar o usuario.");
     } finally {
@@ -511,6 +562,117 @@ export function SettingsScreen() {
               >
                 {isCreatingTeamMember ? "Criando usuario..." : "Cadastrar usuario da equipe"}
               </button>
+            </div>
+
+            <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 14, fontWeight: 900, letterSpacing: "-0.02em" }}>Usuarios cadastrados</div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadTeamMembers();
+                  }}
+                  style={secondaryGhostButtonStyle}
+                >
+                  Atualizar lista
+                </button>
+              </div>
+
+              {isLoadingTeamMembers ? (
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>Carregando usuarios...</div>
+              ) : teamMembers.length ? (
+                teamMembers.map((member) => (
+                  <article
+                    key={member.id}
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: 14,
+                      border: "1px solid var(--line)",
+                      background: "var(--surface-elevated)",
+                      display: "grid",
+                      gap: 8
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontWeight: 900, letterSpacing: "-0.02em" }}>{member.fullName || "Sem nome"}</div>
+                        <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 12 }}>
+                          {member.email || "Sem e-mail"} • {formatRoleName(member.role)}
+                        </div>
+                      </div>
+                      <div style={{ color: "var(--muted)", fontSize: 12 }}>
+                        {member.createdAt ? `Desde ${formatDateTimeLabel(member.createdAt)}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <select
+                        value={member.role}
+                        disabled={teamMemberActionId === member.id}
+                        onChange={async (event) => {
+                          const nextRole = event.target.value as TeamMemberListItem["role"];
+                          setTeamMemberActionId(member.id);
+                          try {
+                            const response = await fetch("/api/admin/users", {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ userId: member.id, role: nextRole })
+                            });
+                            const result = (await response.json()) as { ok?: boolean; message?: string };
+
+                            if (!response.ok || !result.ok) {
+                              setFeedback(result.message || "Nao foi possivel atualizar o papel.");
+                            } else {
+                              setFeedback("Papel atualizado com sucesso.");
+                              await loadTeamMembers();
+                            }
+                          } catch {
+                            setFeedback("Falha ao atualizar papel do usuario.");
+                          } finally {
+                            setTeamMemberActionId(null);
+                          }
+                        }}
+                        style={{ ...inputStyle, minHeight: 40, width: 260 }}
+                      >
+                        <option value="sales">Comercial</option>
+                        <option value="viewer">Acompanhamento</option>
+                        <option value="manager">Gestor</option>
+                        <option value="admin">Master</option>
+                      </select>
+                      <button
+                        type="button"
+                        disabled={teamMemberActionId === member.id}
+                        onClick={async () => {
+                          setTeamMemberActionId(member.id);
+                          try {
+                            const response = await fetch("/api/admin/users", {
+                              method: "DELETE",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ userId: member.id })
+                            });
+                            const result = (await response.json()) as { ok?: boolean; message?: string };
+
+                            if (!response.ok || !result.ok) {
+                              setFeedback(result.message || "Nao foi possivel excluir o usuario.");
+                            } else {
+                              setFeedback("Usuario excluido com sucesso.");
+                              await loadTeamMembers();
+                            }
+                          } catch {
+                            setFeedback("Falha ao excluir usuario.");
+                          } finally {
+                            setTeamMemberActionId(null);
+                          }
+                        }}
+                        style={dangerButtonStyle}
+                      >
+                        Excluir
+                      </button>
+                    </div>
+                  </article>
+                ))
+              ) : (
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>Nenhum usuario encontrado na equipe.</div>
+              )}
             </div>
           </div>
         ) : null}
@@ -897,6 +1059,22 @@ function formatDateTimeLabel(value: string) {
     hour: "2-digit",
     minute: "2-digit"
   });
+}
+
+function formatRoleName(role: TeamMemberListItem["role"]) {
+  if (role === "admin") {
+    return "Master";
+  }
+
+  if (role === "manager") {
+    return "Gestor";
+  }
+
+  if (role === "viewer") {
+    return "Acompanhamento";
+  }
+
+  return "Comercial";
 }
 
 const sectionStyle: React.CSSProperties = {
