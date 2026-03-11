@@ -2,13 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CrmShell } from "@/components/crm-shell";
-import { clearCrmOperationalData } from "@/lib/crm-data-source";
+import {
+  clearCrmOperationalData,
+  getPipelineAgentExecutionHistory,
+  type PipelineAgentExecutionHistoryEntry
+} from "@/lib/crm-data-source";
 import {
   defaultCrmSettings,
   getCrmSettings,
   saveCrmSettings,
   type CrmSettings,
   type FeatureKey,
+  type PipelineAgentStageLimits,
   type SupportedLocale,
   type SupportedTimeZone,
   updateCrmPassword
@@ -79,12 +84,13 @@ export function SettingsScreen() {
   const [isCreatingTeamMember, setIsCreatingTeamMember] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
+  const [agentHistory, setAgentHistory] = useState<PipelineAgentExecutionHistoryEntry[]>([]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function load() {
-      const next = await getCrmSettings();
+      const [next, history] = await Promise.all([getCrmSettings(), getPipelineAgentExecutionHistory(12)]);
 
       if (isMounted) {
         setDraftSettings({
@@ -93,8 +99,17 @@ export function SettingsScreen() {
           features: {
             ...defaultCrmSettings.features,
             ...next.features
+          },
+          pipelineAgent: {
+            ...defaultCrmSettings.pipelineAgent,
+            ...next.pipelineAgent,
+            stageLimits: {
+              ...defaultCrmSettings.pipelineAgent.stageLimits,
+              ...next.pipelineAgent.stageLimits
+            }
           }
         });
+        setAgentHistory(history);
       }
     }
 
@@ -127,6 +142,22 @@ export function SettingsScreen() {
     setDraftSettings(next);
     await saveCrmSettings(next);
     setFeedback("Funcionalidade atualizada.");
+  }
+
+  function updatePipelineStageLimit(key: keyof PipelineAgentStageLimits, value: string) {
+    const parsed = Number(value);
+    const safeValue = Number.isFinite(parsed) ? Math.max(1, Math.min(30, Math.round(parsed))) : 1;
+
+    setDraftSettings((current) => ({
+      ...current,
+      pipelineAgent: {
+        ...current.pipelineAgent,
+        stageLimits: {
+          ...current.pipelineAgent.stageLimits,
+          [key]: safeValue
+        }
+      }
+    }));
   }
 
   async function handlePasswordSave() {
@@ -477,6 +508,158 @@ export function SettingsScreen() {
         <div style={sectionStyle}>
           <div style={sectionHeaderStyle}>
             <div>
+              <div style={eyebrowStyle}>Agente</div>
+              <h2 style={sectionTitleStyle}>Automacao do pipeline</h2>
+              <p style={sectionTextStyle}>
+                Define horario da rotina diaria, limite de tarefas automaticas e tempo maximo por etapa antes de considerar esfriamento.
+              </p>
+            </div>
+          </div>
+
+          <div style={gridStyle}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Agente ativo</span>
+              <select
+                value={draftSettings.pipelineAgent.enabled ? "on" : "off"}
+                onChange={(event) =>
+                  setDraftSettings((current) => ({
+                    ...current,
+                    pipelineAgent: {
+                      ...current.pipelineAgent,
+                      enabled: event.target.value === "on"
+                    }
+                  }))
+                }
+                style={inputStyle}
+              >
+                <option value="on">Ativo</option>
+                <option value="off">Desativado</option>
+              </select>
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Horario da rotina</span>
+              <input
+                type="time"
+                value={draftSettings.pipelineAgent.runAt}
+                onChange={(event) =>
+                  setDraftSettings((current) => ({
+                    ...current,
+                    pipelineAgent: {
+                      ...current.pipelineAgent,
+                      runAt: event.target.value || "08:00"
+                    }
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Max. tarefas automaticas/dia</span>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={draftSettings.pipelineAgent.maxTasksPerDay}
+                onChange={(event) =>
+                  setDraftSettings((current) => ({
+                    ...current,
+                    pipelineAgent: {
+                      ...current.pipelineAgent,
+                      maxTasksPerDay: Math.max(1, Math.min(20, Number(event.target.value) || 1))
+                    }
+                  }))
+                }
+                style={inputStyle}
+              />
+            </label>
+          </div>
+
+          <div style={{ ...gridStyle, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Lead (dias)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={draftSettings.pipelineAgent.stageLimits.lead}
+                onChange={(event) => updatePipelineStageLimit("lead", event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Qualificacao (dias)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={draftSettings.pipelineAgent.stageLimits.qualification}
+                onChange={(event) => updatePipelineStageLimit("qualification", event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Diagnostico (dias)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={draftSettings.pipelineAgent.stageLimits.diagnosis}
+                onChange={(event) => updatePipelineStageLimit("diagnosis", event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Proposta (dias)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={draftSettings.pipelineAgent.stageLimits.proposal}
+                onChange={(event) => updatePipelineStageLimit("proposal", event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Negociacao (dias)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={draftSettings.pipelineAgent.stageLimits.negotiation}
+                onChange={(event) => updatePipelineStageLimit("negotiation", event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+            <label style={fieldStyle}>
+              <span style={labelStyle}>Fechamento (dias)</span>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                value={draftSettings.pipelineAgent.stageLimits.closing}
+                onChange={(event) => updatePipelineStageLimit("closing", event.target.value)}
+                style={inputStyle}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={async () => {
+                await saveCrmSettings(draftSettings);
+                setFeedback("Configuracoes do agente salvas.");
+              }}
+              style={primaryButtonStyle}
+            >
+              Salvar configuracoes do agente
+            </button>
+          </div>
+        </div>
+
+        <div style={sectionStyle}>
+          <div style={sectionHeaderStyle}>
+            <div>
               <div style={eyebrowStyle}>Feature flags</div>
               <h2 style={sectionTitleStyle}>Habilitar e desabilitar funcionalidades</h2>
               <p style={sectionTextStyle}>
@@ -520,6 +703,68 @@ export function SettingsScreen() {
                 </label>
               </div>
             ))}
+          </div>
+        </div>
+
+        <div style={sectionStyle}>
+          <div style={sectionHeaderStyle}>
+            <div>
+              <div style={eyebrowStyle}>Historico do agente</div>
+              <h2 style={sectionTitleStyle}>Ultimas execucoes</h2>
+              <p style={sectionTextStyle}>
+                Mostra quando o agente rodou, quantos negocios analisou, quantas tarefas criou e o motivo da execucao.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={async () => setAgentHistory(await getPipelineAgentExecutionHistory(12))}
+              style={secondaryGhostButtonStyle}
+            >
+              Atualizar historico
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            {agentHistory.length ? (
+              agentHistory.map((item) => (
+                <article
+                  key={item.id}
+                  style={{
+                    padding: "14px 16px",
+                    borderRadius: 16,
+                    border: "1px solid var(--line)",
+                    background: "#ffffff",
+                    display: "grid",
+                    gap: 6
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <span
+                      style={{
+                        ...historyBadgeStyle,
+                        color: item.executed ? "#0f766e" : "#b45309",
+                        background: item.executed ? "rgba(16, 185, 129, 0.12)" : "rgba(245, 158, 11, 0.12)"
+                      }}
+                    >
+                      {item.executed ? "Executado" : "Nao executado"}
+                    </span>
+                    <span style={{ color: "var(--muted)", fontSize: 12 }}>
+                      {formatDateTimeLabel(item.ranAt)}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--muted)", fontSize: 12 }}>
+                    <span>Analisados: {item.reviewed}</span>
+                    <span>Tarefas criadas: {item.createdTasks}</span>
+                    <span>Dia-base: {item.dateKey}</span>
+                  </div>
+                  <div style={{ color: "var(--foreground)", fontSize: 13 }}>{item.reason}</div>
+                </article>
+              ))
+            ) : (
+              <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                Ainda nao ha execucoes registradas do agente.
+              </div>
+            )}
           </div>
         </div>
 
@@ -577,6 +822,7 @@ export function SettingsScreen() {
                 onClick={async () => {
                   const result = await clearCrmOperationalData();
                   setFeedback(result.message);
+                  setAgentHistory([]);
                   setIsConfirmingReset(false);
                 }}
                 style={dangerButtonStyle}
@@ -625,6 +871,22 @@ function StatCard({
       </div>
     </div>
   );
+}
+
+function formatDateTimeLabel(value: string) {
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 const sectionStyle: React.CSSProperties = {
@@ -806,4 +1068,16 @@ const toggleThumbStyle: React.CSSProperties = {
   background: "#ffffff",
   boxShadow: "0 2px 8px rgba(15, 23, 42, 0.18)",
   transition: "transform 0.2s ease"
+};
+
+const historyBadgeStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: 26,
+  borderRadius: 999,
+  padding: "0 10px",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase"
 };

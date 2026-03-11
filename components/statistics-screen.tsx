@@ -1,9 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { CrmShell } from "@/components/crm-shell";
-import { getPipelineStatistics } from "@/lib/crm-data-source";
-import type { PipelineStatistics } from "@/types/crm-app";
+import { getPipelineAttention, getPipelineStatistics, runPipelineAttentionAgent } from "@/lib/crm-data-source";
+import type { PipelineAttentionData, PipelineAttentionItem, PipelineStatistics } from "@/types/crm-app";
 
 const periodOptions = [
   { id: "30d", label: "30 dias", days: 30 },
@@ -29,19 +30,37 @@ const emptyStatistics: PipelineStatistics = {
   sourceConversions: []
 };
 
+const emptyAttention: PipelineAttentionData = {
+  generatedAt: "",
+  summary: {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    monitored: 0
+  },
+  items: []
+};
+
 export function StatisticsScreen() {
   const [stats, setStats] = useState<PipelineStatistics>(emptyStatistics);
+  const [attention, setAttention] = useState<PipelineAttentionData>(emptyAttention);
   const [periodId, setPeriodId] = useState<(typeof periodOptions)[number]["id"]>("30d");
   const activePeriod = periodOptions.find((item) => item.id === periodId) ?? periodOptions[0];
+
+  useEffect(() => {
+    void runPipelineAttentionAgent();
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
 
     async function load() {
-      const next = await getPipelineStatistics(activePeriod.days);
+      const [nextStats, nextAttention] = await Promise.all([getPipelineStatistics(activePeriod.days), getPipelineAttention(12)]);
 
       if (isMounted) {
-        setStats(next);
+        setStats(nextStats);
+        setAttention(nextAttention);
       }
     }
 
@@ -140,6 +159,71 @@ export function StatisticsScreen() {
             value={formatCurrency(stats.weightedPipeline)}
             detail="Receita potencial ajustada pela chance real de fechamento."
           />
+        </div>
+      </section>
+
+      <section style={panelStyle}>
+        <div style={sectionHeaderStyle}>
+          <div>
+            <div style={eyebrowStyle}>Radar de atencao</div>
+            <h2 style={titleStyle}>Onde agir agora no pipeline</h2>
+          </div>
+          <div style={summaryBadgeStyle}>{attention.summary.monitored} negocio(s) monitorado(s)</div>
+        </div>
+        <div style={attentionSummaryGridStyle}>
+          <AttentionSummaryCard label="Criticos" value={String(attention.summary.critical)} tone="critical" />
+          <AttentionSummaryCard label="Altos" value={String(attention.summary.high)} tone="high" />
+          <AttentionSummaryCard label="Medios" value={String(attention.summary.medium)} tone="medium" />
+          <AttentionSummaryCard label="Baixos" value={String(attention.summary.low)} tone="low" />
+        </div>
+        <div style={attentionListStyle}>
+          {attention.items.length ? (
+            attention.items.map((item) => (
+              <article key={item.opportunityId} style={attentionCardStyle}>
+                <div style={attentionCardHeaderStyle}>
+                  <div>
+                    <div style={stageTitleStyle}>{item.title}</div>
+                    <div style={stageSubtleStyle}>
+                      {item.company} • {item.stage} • {formatCurrency(item.amount)}
+                    </div>
+                  </div>
+                  <div style={attentionPillStyle(item.level)}>Score {item.attentionScore}</div>
+                </div>
+                <div style={attentionMetaStyle}>
+                  <span>Responsavel: {item.owner}</span>
+                  <span>
+                    {item.daysWithoutInteraction !== undefined
+                      ? `Sem interacao ha ${item.daysWithoutInteraction} dia(s)`
+                      : "Interacao recente sem data registrada"}
+                  </span>
+                  <span>
+                    {item.daysToClose !== undefined
+                      ? item.daysToClose >= 0
+                        ? `Fechamento em ${item.daysToClose} dia(s)`
+                        : `Fechamento vencido ha ${Math.abs(item.daysToClose)} dia(s)`
+                      : "Sem previsao de fechamento"}
+                  </span>
+                </div>
+                <div style={attentionReasonListStyle}>
+                  {item.reasons.map((reason) => (
+                    <div key={reason} style={attentionReasonItemStyle}>
+                      {reason}
+                    </div>
+                  ))}
+                </div>
+                <div style={attentionActionRowStyle}>
+                  <div style={sourceConversionMetaStyle}>{item.recommendedAction}</div>
+                  <Link href={item.href} style={attentionActionLinkStyle}>
+                    Abrir negocio
+                  </Link>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div style={emptyStageStyle}>
+              Sem alertas de atencao no momento. O pipeline aberto esta dentro das regras de acompanhamento.
+            </div>
+          )}
         </div>
       </section>
 
@@ -322,6 +406,23 @@ function StatBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
+function AttentionSummaryCard({
+  label,
+  value,
+  tone
+}: {
+  label: string;
+  value: string;
+  tone: PipelineAttentionItem["level"];
+}) {
+  return (
+    <article style={attentionSummaryCardStyle(tone)}>
+      <div style={cardLabelStyle}>{label}</div>
+      <div style={statValueStyle}>{value}</div>
+    </article>
+  );
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -343,6 +444,52 @@ function formatDateLabel(value: string | null) {
   }
 
   return parsed.toLocaleDateString("pt-BR");
+}
+
+function attentionPillStyle(level: PipelineAttentionItem["level"]): React.CSSProperties {
+  if (level === "critical") {
+    return {
+      ...attentionPillBaseStyle,
+      background: "rgba(220, 38, 38, 0.14)",
+      color: "#991b1b"
+    };
+  }
+
+  if (level === "high") {
+    return {
+      ...attentionPillBaseStyle,
+      background: "rgba(234, 88, 12, 0.14)",
+      color: "#9a3412"
+    };
+  }
+
+  if (level === "medium") {
+    return {
+      ...attentionPillBaseStyle,
+      background: "rgba(202, 138, 4, 0.18)",
+      color: "#854d0e"
+    };
+  }
+
+  return {
+    ...attentionPillBaseStyle,
+    background: "rgba(20, 184, 166, 0.12)",
+    color: "#0f766e"
+  };
+}
+
+function attentionSummaryCardStyle(level: PipelineAttentionItem["level"]): React.CSSProperties {
+  return {
+    ...statBlockStyle,
+    borderColor:
+      level === "critical"
+        ? "rgba(220, 38, 38, 0.25)"
+        : level === "high"
+          ? "rgba(234, 88, 12, 0.25)"
+          : level === "medium"
+            ? "rgba(202, 138, 4, 0.25)"
+            : "rgba(20, 184, 166, 0.25)"
+  };
 }
 
 const panelStyle: React.CSSProperties = {
@@ -631,4 +778,81 @@ const sourceConversionRateStyle: React.CSSProperties = {
   fontWeight: 900,
   letterSpacing: "-0.02em",
   color: "var(--accent)"
+};
+
+const attentionSummaryGridStyle: React.CSSProperties = {
+  marginTop: 18,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 12
+};
+
+const attentionListStyle: React.CSSProperties = {
+  marginTop: 14,
+  display: "grid",
+  gap: 12
+};
+
+const attentionCardStyle: React.CSSProperties = {
+  padding: 16,
+  borderRadius: 18,
+  border: "1px solid var(--line)",
+  background: "linear-gradient(180deg, #ffffff 0%, var(--surface-elevated) 100%)"
+};
+
+const attentionCardHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 12
+};
+
+const attentionPillBaseStyle: React.CSSProperties = {
+  padding: "6px 10px",
+  borderRadius: 999,
+  fontSize: 12,
+  fontWeight: 800
+};
+
+const attentionMetaStyle: React.CSSProperties = {
+  marginTop: 10,
+  display: "flex",
+  flexWrap: "wrap",
+  gap: 10,
+  color: "var(--muted)",
+  fontSize: 12
+};
+
+const attentionReasonListStyle: React.CSSProperties = {
+  marginTop: 10,
+  display: "grid",
+  gap: 8
+};
+
+const attentionReasonItemStyle: React.CSSProperties = {
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  background: "#ffffff",
+  padding: "8px 10px",
+  fontSize: 12,
+  color: "var(--foreground)"
+};
+
+const attentionActionRowStyle: React.CSSProperties = {
+  marginTop: 12,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap"
+};
+
+const attentionActionLinkStyle: React.CSSProperties = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(79, 70, 229, 0.22)",
+  color: "var(--accent)",
+  textDecoration: "none",
+  fontSize: 12,
+  fontWeight: 800
 };

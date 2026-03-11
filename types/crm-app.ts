@@ -165,3 +165,34 @@ export type PipelineStatistics = {
     }>;
   }>;
 };
+
+export type PipelineAttentionLevel = "critical" | "high" | "medium" | "low";
+
+export type PipelineAttentionItem = {
+  opportunityId: string;
+  title: string;
+  company: string;
+  owner: string;
+  stage: string;
+  amount: number;
+  attentionScore: number;
+  level: PipelineAttentionLevel;
+  reasons: string[];
+  recommendedAction: string;
+  lastInteractionAt?: string;
+  daysWithoutInteraction?: number;
+  daysToClose?: number;
+  href: string;
+};
+
+export type PipelineAttentionData = {
+  generatedAt: string;
+  summary: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
+    monitored: number;
+  };
+  items: PipelineAttentionItem[];
+};

@@ -12,6 +12,20 @@ export type FeatureKey =
 
 export type SupportedLocale = "pt-BR" | "en-US" | "es-ES";
 export type SupportedTimeZone = "system" | "America/Sao_Paulo" | "America/New_York" | "UTC";
+export type PipelineAgentStageLimits = {
+  lead: number;
+  qualification: number;
+  diagnosis: number;
+  proposal: number;
+  negotiation: number;
+  closing: number;
+};
+export type PipelineAgentSettings = {
+  enabled: boolean;
+  runAt: string;
+  maxTasksPerDay: number;
+  stageLimits: PipelineAgentStageLimits;
+};
 
 export type CrmSettings = {
   displayName: string;
@@ -20,11 +34,73 @@ export type CrmSettings = {
   timeZone: SupportedTimeZone;
   use24HourClock: boolean;
   features: Record<FeatureKey, boolean>;
+  pipelineAgent: PipelineAgentSettings;
 };
 
 const LOCAL_SETTINGS_KEY = "crm_system_settings";
 const SETTINGS_CHANGED_EVENT = "crm:settings-changed";
 const SETTINGS_CACHE_TTL_MS = 5000;
+const PIPELINE_AGENT_FEATURE_KEY = "__pipeline_agent";
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizeRunAt(value: string | undefined) {
+  const parsed = (value ?? "").trim();
+  if (!/^\d{2}:\d{2}$/.test(parsed)) {
+    return "08:00";
+  }
+
+  const [hoursRaw, minutesRaw] = parsed.split(":");
+  const hours = clamp(Number(hoursRaw), 0, 23);
+  const minutes = clamp(Number(minutesRaw), 0, 59);
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function parsePipelineAgentSettings(raw: unknown): PipelineAgentSettings {
+  const base = {
+    enabled: true,
+    runAt: "08:00",
+    maxTasksPerDay: 5,
+    stageLimits: {
+      lead: 7,
+      qualification: 6,
+      diagnosis: 6,
+      proposal: 4,
+      negotiation: 3,
+      closing: 2
+    }
+  } satisfies PipelineAgentSettings;
+
+  if (!raw || typeof raw !== "object") {
+    return base;
+  }
+
+  const source = raw as Partial<PipelineAgentSettings> & {
+    stageLimits?: Partial<PipelineAgentStageLimits>;
+  };
+
+  return {
+    enabled: typeof source.enabled === "boolean" ? source.enabled : base.enabled,
+    runAt: normalizeRunAt(typeof source.runAt === "string" ? source.runAt : base.runAt),
+    maxTasksPerDay: clamp(
+      typeof source.maxTasksPerDay === "number" && Number.isFinite(source.maxTasksPerDay)
+        ? Math.round(source.maxTasksPerDay)
+        : base.maxTasksPerDay,
+      1,
+      20
+    ),
+    stageLimits: {
+      lead: clamp(source.stageLimits?.lead ?? base.stageLimits.lead, 1, 30),
+      qualification: clamp(source.stageLimits?.qualification ?? base.stageLimits.qualification, 1, 30),
+      diagnosis: clamp(source.stageLimits?.diagnosis ?? base.stageLimits.diagnosis, 1, 30),
+      proposal: clamp(source.stageLimits?.proposal ?? base.stageLimits.proposal, 1, 30),
+      negotiation: clamp(source.stageLimits?.negotiation ?? base.stageLimits.negotiation, 1, 30),
+      closing: clamp(source.stageLimits?.closing ?? base.stageLimits.closing, 1, 30)
+    }
+  };
+}
 
 export const defaultCrmSettings: CrmSettings = {
   displayName: "Administrador CRM",
@@ -39,7 +115,8 @@ export const defaultCrmSettings: CrmSettings = {
     task_reminders: true,
     pipeline_drag_drop: true,
     history_module: true
-  }
+  },
+  pipelineAgent: parsePipelineAgentSettings(null)
 };
 
 type CurrentSettingsUserContext = {
@@ -74,6 +151,12 @@ function getLocalSettings() {
 
   try {
     const parsed = JSON.parse(raw) as Partial<CrmSettings>;
+    const parsedFeatures = parsed.features || {};
+    const featureRecord = parsedFeatures as Partial<Record<FeatureKey, boolean>>;
+    const pipelineAgentFromFeatures =
+      typeof parsedFeatures === "object" && parsedFeatures
+        ? (parsedFeatures as Record<string, unknown>)[PIPELINE_AGENT_FEATURE_KEY]
+        : undefined;
 
     return {
       displayName: parsed.displayName || defaultCrmSettings.displayName,
@@ -93,8 +176,11 @@ function getLocalSettings() {
         typeof parsed.use24HourClock === "boolean" ? parsed.use24HourClock : defaultCrmSettings.use24HourClock,
       features: {
         ...defaultCrmSettings.features,
-        ...(parsed.features || {})
-      }
+        ...featureRecord
+      },
+      pipelineAgent: parsePipelineAgentSettings(
+        parsed.pipelineAgent ?? pipelineAgentFromFeatures ?? defaultCrmSettings.pipelineAgent
+      )
     };
   } catch {
     return defaultCrmSettings;
@@ -253,7 +339,12 @@ export async function getCrmSettings(): Promise<CrmSettings> {
           ? (data.features as Partial<Record<FeatureKey, boolean>>)
           : {}),
         ...local.features
-      }
+      },
+      pipelineAgent: parsePipelineAgentSettings(
+        (typeof data.features === "object" && data.features
+          ? (data.features as Record<string, unknown>)[PIPELINE_AGENT_FEATURE_KEY]
+          : undefined) ?? local.pipelineAgent
+      )
     };
 
     saveLocalSettings(next, false);
@@ -275,28 +366,38 @@ export async function getCrmSettings(): Promise<CrmSettings> {
 }
 
 export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSettings> {
+  const normalizedSettings: CrmSettings = {
+    ...settings,
+    pipelineAgent: parsePipelineAgentSettings(settings.pipelineAgent)
+  };
+
   currentSettingsCache = {
     expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS,
-    promise: Promise.resolve(settings)
+    promise: Promise.resolve(normalizedSettings)
   };
-  saveLocalSettings(settings, false);
+  saveLocalSettings(normalizedSettings, false);
   const context = await getCurrentUserContext();
 
   if (!context) {
     notifyCrmSettingsChanged();
-    return settings;
+    return normalizedSettings;
   }
+
+  const featuresPayload: Record<string, unknown> = {
+    ...normalizedSettings.features,
+    [PIPELINE_AGENT_FEATURE_KEY]: normalizedSettings.pipelineAgent
+  };
 
   const { error } = await supabase.from("app_settings").upsert(
     {
       organization_id: context.organizationId,
       user_id: context.userId,
-      display_name: settings.displayName,
-      company_name: settings.companyName,
-      locale: settings.locale,
-      time_zone: settings.timeZone,
-      use_24_hour_clock: settings.use24HourClock,
-      features: settings.features,
+      display_name: normalizedSettings.displayName,
+      company_name: normalizedSettings.companyName,
+      locale: normalizedSettings.locale,
+      time_zone: normalizedSettings.timeZone,
+      use_24_hour_clock: normalizedSettings.use24HourClock,
+      features: featuresPayload,
       updated_at: new Date().toISOString()
     },
     {
@@ -307,11 +408,11 @@ export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSetting
   if (error) {
     currentSettingsCache = null;
     notifyCrmSettingsChanged();
-    return settings;
+    return normalizedSettings;
   }
 
   notifyCrmSettingsChanged();
-  return settings;
+  return normalizedSettings;
 }
 
 export async function updateCrmPassword(newPassword: string): Promise<{ ok: boolean; message: string }> {

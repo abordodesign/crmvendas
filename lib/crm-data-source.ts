@@ -17,6 +17,8 @@ import type {
   DashboardData,
   NotificationItem,
   NotificationPriority,
+  PipelineAttentionData,
+  PipelineAttentionItem,
   OpportunityItem,
   OpportunityNote,
   PipelineStatistics,
@@ -74,14 +76,28 @@ const LOCAL_CUSTOMERS_KEY = "crm_local_customers";
 const LOCAL_ACTIVITY_KEY = "crm_local_activity";
 const LOCAL_AGENDA_KEY = "crm_local_agenda";
 const LOCAL_NOTIFICATIONS_KEY = "crm_local_notifications";
+const LOCAL_AGENT_LAST_RUN_DATE_KEY = "crm_pipeline_agent_last_run_date";
+const LOCAL_AGENT_HISTORY_KEY = "crm_pipeline_agent_history";
 const CRM_DATA_CHANGED_EVENT = "crm:data-changed";
 const STAGE_NOTE_PREFIX = "stage_move:";
 const AUDIT_NOTE_PREFIX = "audit:";
 const OPPORTUNITY_NOTE_PREFIX = "opportunity_note:";
+const AGENT_TASK_PREFIX = "[AGENTE PIPELINE]";
 const USER_CONTEXT_CACHE_TTL_MS = 5000;
 const QUERY_CACHE_TTL_MS = 4000;
 const DASHBOARD_PIPELINE_LIMIT = 120;
 const REFERENCE_ITEMS_LIMIT = 200;
+const MAX_AGENT_HISTORY_ITEMS = 40;
+
+export type PipelineAgentExecutionHistoryEntry = {
+  id: string;
+  dateKey: string;
+  ranAt: string;
+  executed: boolean;
+  createdTasks: number;
+  reviewed: number;
+  reason: string;
+};
 let currentUserContextCache:
   | {
       expiresAt: number;
@@ -314,6 +330,40 @@ function getLocalNotifications(): StoredNotification[] {
   }
 }
 
+function getLocalAgentExecutionHistory(): PipelineAgentExecutionHistoryEntry[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  const raw = window.localStorage.getItem(LOCAL_AGENT_HISTORY_KEY);
+
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as PipelineAgentExecutionHistoryEntry[];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item) => item && typeof item === "object")
+      .map((item) => ({
+        id: item.id,
+        dateKey: item.dateKey,
+        ranAt: item.ranAt,
+        executed: Boolean(item.executed),
+        createdTasks: Number.isFinite(item.createdTasks) ? item.createdTasks : 0,
+        reviewed: Number.isFinite(item.reviewed) ? item.reviewed : 0,
+        reason: item.reason || "Sem detalhe"
+      }));
+  } catch {
+    return [];
+  }
+}
+
 function saveLocalOpportunityNotes(items: OpportunityNote[]) {
   if (typeof window === "undefined") {
     return;
@@ -330,6 +380,120 @@ function saveLocalNotifications(items: StoredNotification[]) {
 
   window.localStorage.setItem(LOCAL_NOTIFICATIONS_KEY, JSON.stringify(items));
   notifyCrmDataChanged();
+}
+
+function saveLocalAgentExecutionHistory(items: PipelineAgentExecutionHistoryEntry[], notify = true) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(LOCAL_AGENT_HISTORY_KEY, JSON.stringify(items.slice(0, MAX_AGENT_HISTORY_ITEMS)));
+
+  if (notify) {
+    notifyCrmDataChanged();
+  }
+}
+
+async function registerPipelineAgentExecution(
+  entry: Omit<PipelineAgentExecutionHistoryEntry, "id">,
+  context: Awaited<ReturnType<typeof getCurrentUserContext>> | null
+) {
+  if (typeof window !== "undefined") {
+    const current = getLocalAgentExecutionHistory();
+    const last = current[0];
+
+    if (
+      !last ||
+      !(
+        last.dateKey === entry.dateKey &&
+        last.executed === entry.executed &&
+        last.createdTasks === entry.createdTasks &&
+        last.reviewed === entry.reviewed &&
+        last.reason === entry.reason
+      )
+    ) {
+      const next: PipelineAgentExecutionHistoryEntry = {
+        id: `agent-run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        ...entry
+      };
+
+      saveLocalAgentExecutionHistory([next, ...current], true);
+    }
+  }
+
+  if (!context) {
+    return;
+  }
+
+  try {
+    const { data: latest } = await supabase
+      .from("pipeline_agent_runs")
+      .select("id, date_key, executed, created_tasks, reviewed, reason")
+      .eq("user_id", context.userId)
+      .order("ran_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const isDuplicate =
+      latest &&
+      latest.date_key === entry.dateKey &&
+      Boolean(latest.executed) === entry.executed &&
+      (latest.created_tasks ?? 0) === entry.createdTasks &&
+      (latest.reviewed ?? 0) === entry.reviewed &&
+      (latest.reason ?? "") === entry.reason;
+
+    if (isDuplicate) {
+      return;
+    }
+
+    await supabase.from("pipeline_agent_runs").insert({
+      organization_id: context.organizationId,
+      user_id: context.userId,
+      date_key: entry.dateKey,
+      ran_at: entry.ranAt,
+      executed: entry.executed,
+      created_tasks: entry.createdTasks,
+      reviewed: entry.reviewed,
+      reason: entry.reason
+    });
+  } catch {
+    // Fallback local ja foi salvo acima.
+  }
+}
+
+export async function getPipelineAgentExecutionHistory(limit = 20): Promise<PipelineAgentExecutionHistoryEntry[]> {
+  const safeLimit = Math.max(1, limit);
+  const localHistory = getLocalAgentExecutionHistory().slice(0, safeLimit);
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    return localHistory;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("pipeline_agent_runs")
+      .select("id, date_key, ran_at, executed, created_tasks, reviewed, reason")
+      .eq("user_id", context.userId)
+      .order("ran_at", { ascending: false })
+      .limit(safeLimit);
+
+    if (error || !data) {
+      return localHistory;
+    }
+
+    return data.map((item) => ({
+      id: item.id,
+      dateKey: item.date_key,
+      ranAt: item.ran_at,
+      executed: Boolean(item.executed),
+      createdTasks: item.created_tasks ?? 0,
+      reviewed: item.reviewed ?? 0,
+      reason: item.reason ?? "Sem detalhe"
+    }));
+  } catch {
+    return localHistory;
+  }
 }
 
 function saveLocalNotificationsIfChanged(items: StoredNotification[]) {
@@ -374,7 +538,9 @@ export async function clearCrmOperationalData(): Promise<{
       LOCAL_CUSTOMERS_KEY,
       LOCAL_ACTIVITY_KEY,
       LOCAL_AGENDA_KEY,
-      LOCAL_NOTIFICATIONS_KEY
+      LOCAL_NOTIFICATIONS_KEY,
+      LOCAL_AGENT_LAST_RUN_DATE_KEY,
+      LOCAL_AGENT_HISTORY_KEY
     ].forEach((key) => window.localStorage.removeItem(key));
   }
 
@@ -391,6 +557,7 @@ export async function clearCrmOperationalData(): Promise<{
 
   try {
     await supabase.from("notifications").delete().not("id", "is", null);
+    await supabase.from("pipeline_agent_runs").delete().not("id", "is", null);
     await supabase.from("activities").delete().not("id", "is", null);
     await supabase.from("tasks").delete().not("id", "is", null);
     await supabase.from("opportunities").delete().not("id", "is", null);
@@ -888,6 +1055,401 @@ export async function getPipelineStatistics(periodDays = 30): Promise<PipelineSt
   });
 }
 
+function getStageStagnationLimit(stage: string, limits: Awaited<ReturnType<typeof getCrmSettings>>["pipelineAgent"]["stageLimits"]) {
+  const normalized = normalizeStageLabel(stage);
+
+  if (normalized === "Lead") {
+    return limits.lead;
+  }
+
+  if (normalized === "Qualificacao") {
+    return limits.qualification;
+  }
+
+  if (normalized === "Diagnostico") {
+    return limits.diagnosis;
+  }
+
+  if (normalized === "Proposta enviada") {
+    return limits.proposal;
+  }
+
+  if (normalized === "Negociacao") {
+    return limits.negotiation;
+  }
+
+  if (normalized === "Fechamento" || normalized === "Conclusao") {
+    return limits.closing;
+  }
+
+  return limits.lead;
+}
+
+function toAttentionLevel(score: number): PipelineAttentionItem["level"] {
+  if (score >= 70) {
+    return "critical";
+  }
+
+  if (score >= 45) {
+    return "high";
+  }
+
+  if (score >= 25) {
+    return "medium";
+  }
+
+  return "low";
+}
+
+function chooseRecommendedAction(reasons: string[], hasTask: boolean, stage: string) {
+  const normalizedStage = normalizeStageLabel(stage);
+
+  if (reasons.some((reason) => reason.toLowerCase().includes("proximo passo"))) {
+    return "Definir proximo passo objetivo e prazo para hoje.";
+  }
+
+  if (!hasTask) {
+    return "Criar tarefa de follow-up para as proximas 24h.";
+  }
+
+  if (reasons.some((reason) => reason.toLowerCase().includes("vencida"))) {
+    return "Replanejar data de fechamento ou atualizar status real.";
+  }
+
+  if (normalizedStage === "Negociacao" || normalizedStage === "Fechamento") {
+    return "Agendar contato direto com decisor ainda hoje.";
+  }
+
+  return "Registrar nova interacao e confirmar proxima acao com o cliente.";
+}
+
+async function getLatestOpportunityActivities(opportunityIds: string[]) {
+  if (!opportunityIds.length) {
+    return new Map<string, string>();
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("activities")
+      .select("opportunity_id, created_at")
+      .in("opportunity_id", opportunityIds)
+      .order("created_at", { ascending: false })
+      .limit(1200);
+
+    if (error || !data) {
+      return new Map<string, string>();
+    }
+
+    const latestByOpportunity = new Map<string, string>();
+
+    data.forEach((activity) => {
+      if (!activity.opportunity_id || !activity.created_at || latestByOpportunity.has(activity.opportunity_id)) {
+        return;
+      }
+
+      latestByOpportunity.set(activity.opportunity_id, activity.created_at);
+    });
+
+    return latestByOpportunity;
+  } catch {
+    return new Map<string, string>();
+  }
+}
+
+export async function getPipelineAttention(limit = 15): Promise<PipelineAttentionData> {
+  return getCachedQuery(`pipeline:attention:${limit}`, async () => {
+    const [opportunities, tasks, settings] = await Promise.all([getOpportunities(), getTasks(), getCrmSettings()]);
+    const openOpportunities = opportunities.filter(
+      (item) => mapUiOpportunityStatusToDb(item.status) === "open" && !isConclusionStage(item.stage)
+    );
+    const latestActivityMap = await getLatestOpportunityActivities(openOpportunities.map((item) => item.id));
+    const tasksByOpportunity = new Map<string, TaskItem[]>();
+
+    tasks.forEach((task) => {
+      if (!task.opportunityId) {
+        return;
+      }
+
+      const current = tasksByOpportunity.get(task.opportunityId) ?? [];
+      current.push(task);
+      tasksByOpportunity.set(task.opportunityId, current);
+    });
+
+    const openAmounts = openOpportunities.map((item) => amountLabelToNumber(item.amount)).filter((value) => value > 0);
+    const averageAmount = openAmounts.length ? openAmounts.reduce((sum, value) => sum + value, 0) / openAmounts.length : 0;
+    const now = Date.now();
+
+    const attentionItems = openOpportunities
+      .map((item) => {
+        let score = 0;
+        const reasons: string[] = [];
+        const amount = amountLabelToNumber(item.amount);
+        const itemTasks = tasksByOpportunity.get(item.id) ?? [];
+        const hasTask = itemTasks.length > 0;
+        const normalizedNextStep = (item.nextStep ?? "").trim().toLowerCase();
+        const hasPlaceholderStep =
+          !normalizedNextStep || normalizedNextStep.includes("atualizar") || normalizedNextStep.includes("definir");
+
+        if (hasPlaceholderStep && ["Proposta enviada", "Negociacao", "Fechamento", "Conclusao"].includes(item.stage)) {
+          score += 26;
+          reasons.push("Proximo passo indefinido em etapa avancada.");
+        }
+
+        if (!hasTask) {
+          score += 12;
+          reasons.push("Sem tarefa de follow-up vinculada.");
+        }
+
+        const expectedClose = parseDisplayDate(item.expectedCloseDate);
+        let daysToClose: number | undefined;
+
+        if (expectedClose) {
+          daysToClose = Math.ceil((expectedClose.getTime() - now) / 86400000);
+
+          if (daysToClose < 0) {
+            score += 32;
+            reasons.push("Data de fechamento vencida e negocio ainda aberto.");
+          } else if (daysToClose <= 3) {
+            score += hasTask ? 12 : 20;
+            reasons.push("Fechamento previsto nos proximos 3 dias.");
+          }
+        }
+
+        const interactionAt = latestActivityMap.get(item.id) ?? item.createdAt;
+        let daysWithoutInteraction: number | undefined;
+
+        if (interactionAt) {
+          const parsed = new Date(interactionAt);
+
+          if (!Number.isNaN(parsed.getTime())) {
+            daysWithoutInteraction = Math.floor((now - parsed.getTime()) / 86400000);
+            const stageLimit = getStageStagnationLimit(item.stage, settings.pipelineAgent.stageLimits);
+
+            if (daysWithoutInteraction > stageLimit) {
+              const extraDays = daysWithoutInteraction - stageLimit;
+              score += Math.min(35, 14 + extraDays * 2);
+              reasons.push(`Sem interacao ha ${daysWithoutInteraction} dias na etapa ${item.stage}.`);
+            }
+          }
+        }
+
+        if (averageAmount > 0 && amount >= averageAmount * 1.5 && score > 0) {
+          score += 8;
+          reasons.push("Negocio de alto valor requer atencao imediata.");
+        }
+
+        if (score <= 0) {
+          return null;
+        }
+
+        const attentionScore = Math.min(100, score);
+
+        return {
+          opportunityId: item.id,
+          title: item.title,
+          company: item.company,
+          owner: item.owner,
+          stage: item.stage,
+          amount,
+          attentionScore,
+          level: toAttentionLevel(attentionScore),
+          reasons: reasons.slice(0, 3),
+          recommendedAction: chooseRecommendedAction(reasons, hasTask, item.stage),
+          lastInteractionAt: interactionAt,
+          daysWithoutInteraction,
+          daysToClose,
+          href: `/dashboard/opportunities?focus=${item.id}`
+        } as PipelineAttentionItem;
+      })
+      .filter((item): item is PipelineAttentionItem => Boolean(item))
+      .sort((left, right) => {
+        if (right.attentionScore !== left.attentionScore) {
+          return right.attentionScore - left.attentionScore;
+        }
+
+        return right.amount - left.amount;
+      });
+
+    const items = attentionItems.slice(0, Math.max(1, limit));
+    const summary = items.reduce(
+      (acc, item) => {
+        acc[item.level] += 1;
+        return acc;
+      },
+      { critical: 0, high: 0, medium: 0, low: 0 }
+    );
+
+    return {
+      generatedAt: new Date().toISOString(),
+      summary: {
+        ...summary,
+        monitored: items.length
+      },
+      items
+    };
+  });
+}
+
+function isPipelineAgentTaskTitle(title: string | undefined) {
+  return (title ?? "").toUpperCase().includes(AGENT_TASK_PREFIX);
+}
+
+function buildPipelineAttentionNotificationRules(attention: PipelineAttentionData): NotificationRuleDraft[] {
+  const dayKey = formatDateKey(new Date());
+  const levelLabel: Record<PipelineAttentionItem["level"], string> = {
+    critical: "Critico",
+    high: "Alto",
+    medium: "Medio",
+    low: "Baixo"
+  };
+
+  const summaryRule: NotificationRuleDraft = {
+    ruleKey: `pipeline-daily-top10-${dayKey}`,
+    type: "pipeline_daily_summary",
+    label: "Funil",
+    title: "Top 10 do dia: foco comercial",
+    detail: `${attention.summary.critical} critico(s), ${attention.summary.high} alto(s), ${attention.summary.medium} medio(s).`,
+    href: "/dashboard/statistics",
+    priority: attention.summary.critical || attention.summary.high ? "high" : "medium",
+    entityType: "pipeline",
+    entityId: dayKey
+  };
+
+  const itemRules = attention.items.slice(0, 6).map((item) => ({
+    ruleKey: `pipeline-attention-${item.opportunityId}`,
+    type: "pipeline_attention",
+    label: "Funil",
+    title: `${levelLabel[item.level]}: ${item.title}`,
+    detail: `${item.reasons[0] ?? "Negocio precisa de atencao."} Score ${item.attentionScore}.`,
+    href: item.href,
+    priority: item.level === "critical" || item.level === "high" ? "high" : "medium",
+    entityType: "opportunity",
+    entityId: item.opportunityId
+  })) satisfies NotificationRuleDraft[];
+
+  return [summaryRule, ...itemRules];
+}
+
+export async function runPipelineAttentionAgent(): Promise<{
+  executed: boolean;
+  dateKey: string;
+  createdTasks: number;
+  reviewed: number;
+}> {
+  const today = formatDateKey(new Date());
+  const ranAt = new Date().toISOString();
+
+  const [settings, context, attention, tasks] = await Promise.all([
+    getCrmSettings(),
+    getCurrentUserContext(),
+    getPipelineAttention(10),
+    getTasks()
+  ]);
+
+  async function finish(input: { executed: boolean; createdTasks: number; reviewed: number; reason: string }) {
+    await registerPipelineAgentExecution(
+      {
+      dateKey: today,
+      ranAt,
+      executed: input.executed,
+      createdTasks: input.createdTasks,
+      reviewed: input.reviewed,
+      reason: input.reason
+      },
+      context
+    );
+
+    return {
+      executed: input.executed,
+      dateKey: today,
+      createdTasks: input.createdTasks,
+      reviewed: input.reviewed
+    };
+  }
+
+  if (!settings.pipelineAgent.enabled || !hasReachedRunTime(settings.pipelineAgent.runAt)) {
+    return await finish({
+      executed: false,
+      createdTasks: 0,
+      reviewed: attention.items.length,
+      reason: !settings.pipelineAgent.enabled ? "Agente desativado nas configuracoes." : "Aguardando horario configurado."
+    });
+  }
+
+  if (typeof window !== "undefined") {
+    const lastRun = window.localStorage.getItem(LOCAL_AGENT_LAST_RUN_DATE_KEY);
+
+    if (lastRun === today) {
+      return await finish({
+        executed: false,
+        createdTasks: 0,
+        reviewed: attention.items.length,
+        reason: "Rotina diaria ja executada hoje."
+      });
+    }
+
+    // Marcamos no inicio para evitar reexecucao em cascata apos notifyCrmDataChanged.
+    window.localStorage.setItem(LOCAL_AGENT_LAST_RUN_DATE_KEY, today);
+  }
+
+  if (!settings.features.task_reminders || !context) {
+    return await finish({
+      executed: true,
+      createdTasks: 0,
+      reviewed: attention.items.length,
+      reason: !settings.features.task_reminders
+        ? "Lembretes de tarefas estao desativados."
+        : "Sem sessao autenticada para gravar tarefas."
+    });
+  }
+
+  const activeTaskOpportunityIds = new Set(
+    tasks
+      .filter((task) => task.opportunityId && isPipelineAgentTaskTitle(task.title))
+      .map((task) => task.opportunityId as string)
+  );
+
+  let createdTasks = 0;
+  const maxTasksPerDay = settings.pipelineAgent.maxTasksPerDay;
+
+  for (const item of attention.items) {
+    if (createdTasks >= maxTasksPerDay) {
+      break;
+    }
+
+    if (item.level !== "critical" && item.level !== "high") {
+      continue;
+    }
+
+    if (activeTaskOpportunityIds.has(item.opportunityId)) {
+      continue;
+    }
+
+    const dueDate = getDateOffsetInput(item.level === "critical" ? 0 : 1);
+    const dueTime = item.level === "critical" ? "11:00" : "16:00";
+
+    await createTask({
+      title: `${AGENT_TASK_PREFIX} ${item.title}`,
+      opportunityId: item.opportunityId,
+      opportunityTitle: item.title,
+      dueDate,
+      dueTime,
+      priority: item.level === "critical" ? "Alta" : "Media",
+      companyLabel: item.company
+    });
+
+    activeTaskOpportunityIds.add(item.opportunityId);
+    createdTasks += 1;
+  }
+
+  return await finish({
+    executed: true,
+    createdTasks,
+    reviewed: attention.items.length,
+    reason: createdTasks ? "Execucao concluida com criacao de tarefas." : "Execucao concluida sem necessidade de novas tarefas."
+  });
+}
+
 function mapDbOpportunityStatusToUi(value: string | null | undefined) {
   if (!value) {
     return "Em andamento";
@@ -1116,6 +1678,36 @@ function parseDisplayDate(value: string | undefined) {
 
   const parsed = new Date(`${year}-${month}-${day}T12:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateKey(date: Date) {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getDateOffsetInput(daysToAdd: number) {
+  const next = new Date();
+  next.setHours(0, 0, 0, 0);
+  next.setDate(next.getDate() + daysToAdd);
+  return formatDateKey(next);
+}
+
+function hasReachedRunTime(runAt: string) {
+  const [hoursRaw, minutesRaw] = runAt.split(":");
+  const hours = Number(hoursRaw);
+  const minutes = Number(minutesRaw);
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return true;
+  }
+
+  const now = new Date();
+  const scheduled = new Date();
+  scheduled.setHours(hours, minutes, 0, 0);
+
+  return now.getTime() >= scheduled.getTime();
 }
 
 function startOfToday() {
@@ -3285,10 +3877,11 @@ async function syncPersistedNotifications(
 }
 
 export async function getNotificationItems(): Promise<NotificationItem[]> {
-  const [agenda, tasks, opportunities, context, settings] = await Promise.all([
+  const [agenda, tasks, opportunities, attention, context, settings] = await Promise.all([
     getAgendaEntries(),
     getTasks(),
     getOpportunities(),
+    getPipelineAttention(10),
     getCurrentUserContext(),
     getCrmSettings()
   ]);
@@ -3297,11 +3890,14 @@ export async function getNotificationItems(): Promise<NotificationItem[]> {
     return [];
   }
 
-  const drafts = buildNotificationRules({
+  const drafts = [
+    ...buildNotificationRules({
     agenda,
     tasks: settings.features.task_reminders ? tasks : [],
     opportunities
-  }).slice(0, 12);
+    }),
+    ...(settings.pipelineAgent.enabled ? buildPipelineAttentionNotificationRules(attention) : [])
+  ].slice(0, 16);
   const items = await syncPersistedNotifications(drafts, context);
 
   return items
@@ -3396,10 +3992,11 @@ export async function markAllNotificationsAsRead(): Promise<boolean> {
 }
 
 export async function getNotificationCenterItems(): Promise<StoredNotification[]> {
-  const [agenda, tasks, opportunities, context, settings] = await Promise.all([
+  const [agenda, tasks, opportunities, attention, context, settings] = await Promise.all([
     getAgendaEntries(),
     getTasks(),
     getOpportunities(),
+    getPipelineAttention(10),
     getCurrentUserContext(),
     getCrmSettings()
   ]);
@@ -3408,11 +4005,14 @@ export async function getNotificationCenterItems(): Promise<StoredNotification[]
     return [];
   }
 
-  const drafts = buildNotificationRules({
+  const drafts = [
+    ...buildNotificationRules({
     agenda,
     tasks: settings.features.task_reminders ? tasks : [],
     opportunities
-  }).slice(0, 12);
+    }),
+    ...(settings.pipelineAgent.enabled ? buildPipelineAttentionNotificationRules(attention) : [])
+  ].slice(0, 16);
   await syncPersistedNotifications(drafts, context);
 
   if (!context) {

@@ -8,14 +8,16 @@ import {
   createAgendaEntry,
   deleteAgendaEntry,
   getDashboardData,
+  getPipelineAttention,
   getOpportunityReferenceOptions,
   getReferenceOptions,
   moveOpportunityToStage,
+  runPipelineAttentionAgent,
   subscribeCrmDataChanged,
   updateAgendaEntry
 } from "@/lib/crm-data-source";
 import { seedDashboardData } from "@/lib/crm-seed";
-import type { DashboardData } from "@/types/crm-app";
+import type { DashboardData, PipelineAttentionData, PipelineAttentionItem } from "@/types/crm-app";
 
 const FILTER_MODES = [
   { id: "all", label: "Todos" },
@@ -38,9 +40,22 @@ type AgendaOpportunityOption = {
   company: string;
 };
 
+const emptyAttention: PipelineAttentionData = {
+  generatedAt: "",
+  summary: {
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    monitored: 0
+  },
+  items: []
+};
+
 export function DashboardApp() {
   const [settings, setSettings] = useState(defaultCrmSettings);
   const [data, setData] = useState<DashboardData>(seedDashboardData);
+  const [attention, setAttention] = useState<PipelineAttentionData>(emptyAttention);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterIndex, setFilterIndex] = useState(0);
   const [sortIndex, setSortIndex] = useState(0);
@@ -68,14 +83,16 @@ export function DashboardApp() {
     let isMounted = true;
 
     async function load() {
-      const [nextData, refs, opportunities] = await Promise.all([
+      const [nextData, refs, opportunities, attentionData] = await Promise.all([
         getDashboardData(),
         getReferenceOptions(),
-        getOpportunityReferenceOptions()
+        getOpportunityReferenceOptions(),
+        getPipelineAttention(8)
       ]);
 
       if (isMounted) {
         setData(nextData);
+        setAttention(attentionData);
         setAccountOptions(refs.accounts.map((item) => ({ id: item.id, label: item.label })));
         setOpportunityOptions(opportunities);
       }
@@ -90,6 +107,10 @@ export function DashboardApp() {
       isMounted = false;
       unsubscribe();
     };
+  }, []);
+
+  useEffect(() => {
+    void runPipelineAttentionAgent();
   }, []);
 
   useEffect(() => {
@@ -411,6 +432,79 @@ export function DashboardApp() {
             </div>
           </article>
         ))}
+      </section>
+
+      <section
+        style={{
+          padding: 18,
+          borderRadius: 24,
+          background: "#ffffff",
+          border: "1px solid var(--line)",
+          display: "grid",
+          gap: 12
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <div
+              style={{
+                color: "var(--muted)",
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase"
+              }}
+            >
+              Agente comercial
+            </div>
+            <h2 style={{ margin: "8px 0 0", fontSize: "1.1rem" }}>Top prioridades do dia</h2>
+          </div>
+          <Link href="/dashboard/statistics" style={{ ...pillStyle, textDecoration: "none" }}>
+            Ver radar completo
+          </Link>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span style={attentionChipStyle("critical")}>Criticos: {attention.summary.critical}</span>
+          <span style={attentionChipStyle("high")}>Altos: {attention.summary.high}</span>
+          <span style={attentionChipStyle("medium")}>Medios: {attention.summary.medium}</span>
+          <span style={attentionChipStyle("low")}>Baixos: {attention.summary.low}</span>
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          {attention.items.length ? (
+            attention.items.slice(0, 5).map((item) => (
+              <article
+                key={item.opportunityId}
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 14,
+                  border: "1px solid var(--line)",
+                  display: "grid",
+                  gap: 6
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 900, letterSpacing: "-0.02em" }}>{item.title}</div>
+                  <span style={attentionChipStyle(item.level)}>Score {item.attentionScore}</span>
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 13 }}>
+                  {item.company} • {item.stage}
+                </div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>{item.recommendedAction}</div>
+                <div>
+                  <Link href={item.href} style={{ color: "var(--accent)", fontWeight: 800, fontSize: 12 }}>
+                    Abrir negocio
+                  </Link>
+                </div>
+              </article>
+            ))
+          ) : (
+            <div style={{ color: "var(--muted)", fontSize: 13 }}>
+              Sem alertas no momento. O agente segue monitorando o pipeline.
+            </div>
+          )}
+        </div>
       </section>
 
       <section
@@ -1522,5 +1616,41 @@ function dashboardCategoryChipStyle(category: string | undefined): React.CSSProp
     color: "var(--accent)",
     fontSize: 11,
     fontWeight: 800
+  };
+}
+
+function attentionChipStyle(level: PipelineAttentionItem["level"]): React.CSSProperties {
+  if (level === "critical") {
+    return {
+      ...pillStyle,
+      background: "rgba(220, 38, 38, 0.12)",
+      color: "#991b1b",
+      borderColor: "rgba(220, 38, 38, 0.2)"
+    };
+  }
+
+  if (level === "high") {
+    return {
+      ...pillStyle,
+      background: "rgba(234, 88, 12, 0.12)",
+      color: "#9a3412",
+      borderColor: "rgba(234, 88, 12, 0.2)"
+    };
+  }
+
+  if (level === "medium") {
+    return {
+      ...pillStyle,
+      background: "rgba(202, 138, 4, 0.14)",
+      color: "#854d0e",
+      borderColor: "rgba(202, 138, 4, 0.22)"
+    };
+  }
+
+  return {
+    ...pillStyle,
+    background: "rgba(20, 184, 166, 0.12)",
+    color: "#0f766e",
+    borderColor: "rgba(20, 184, 166, 0.2)"
   };
 }
