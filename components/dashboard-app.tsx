@@ -515,12 +515,15 @@ export function DashboardApp() {
               </div>
             </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                <input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Buscar no funil"
-                  style={searchInputStyle}
-                />
+                <label style={controlFieldStyle}>
+                  <span style={controlLabelStyle}>Buscar</span>
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Buscar no funil"
+                    style={searchInputStyle}
+                  />
+                </label>
                 <label style={controlFieldStyle}>
                   <span style={controlLabelStyle}>Filtro</span>
                   <select
