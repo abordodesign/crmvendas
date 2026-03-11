@@ -107,6 +107,7 @@ begin
     when 'admin' then 'admin'::public.app_role
     when 'manager' then 'manager'::public.app_role
     when 'sales' then 'sales'::public.app_role
+    when 'viewer' then 'viewer'::public.app_role
     else 'admin'::public.app_role
   end;
 

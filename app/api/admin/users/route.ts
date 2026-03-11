@@ -6,7 +6,7 @@ type CreateUserBody = {
   displayName?: string;
   email?: string;
   password?: string;
-  role?: "admin" | "manager" | "sales";
+  role?: "admin" | "manager" | "sales" | "viewer";
 };
 
 type DeleteUserBody = {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!["admin", "manager", "sales"].includes(role)) {
+  if (!["admin", "manager", "sales", "viewer"].includes(role)) {
     return NextResponse.json({ ok: false, message: "Papel invalido." }, { status: 400 });
   }
 

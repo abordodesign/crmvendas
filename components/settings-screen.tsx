@@ -85,7 +85,7 @@ export function SettingsScreen() {
   const [teamMemberDisplayName, setTeamMemberDisplayName] = useState("");
   const [teamMemberEmail, setTeamMemberEmail] = useState("");
   const [teamMemberPassword, setTeamMemberPassword] = useState("");
-  const [teamMemberRole, setTeamMemberRole] = useState<"admin" | "manager" | "sales">("sales");
+  const [teamMemberRole, setTeamMemberRole] = useState<"admin" | "manager" | "sales" | "viewer">("sales");
   const [isCreatingTeamMember, setIsCreatingTeamMember] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
@@ -490,11 +490,12 @@ export function SettingsScreen() {
                 <select
                   value={teamMemberRole}
                   onChange={(event) =>
-                    setTeamMemberRole(event.target.value as "admin" | "manager" | "sales")
+                    setTeamMemberRole(event.target.value as "admin" | "manager" | "sales" | "viewer")
                   }
                   style={inputStyle}
                 >
                   <option value="sales">Comercial</option>
+                  <option value="viewer">Acompanhamento (somente leitura)</option>
                   <option value="manager">Gestor</option>
                   <option value="admin">Master</option>
                 </select>

@@ -92,6 +92,10 @@ function formatRoleLabel(role: AppRole | null) {
     return "Comercial";
   }
 
+  if (role === "viewer") {
+    return "Acompanhamento";
+  }
+
   return "Sem perfil";
 }
 
@@ -108,6 +112,10 @@ function normalizeAppRole(value: unknown): AppRole | null {
 
   if (normalizedValue === "sales") {
     return "sales";
+  }
+
+  if (normalizedValue === "viewer" || normalizedValue === "acompanhamento") {
+    return "viewer";
   }
 
   return null;

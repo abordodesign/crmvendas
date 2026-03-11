@@ -1,6 +1,6 @@
 create extension if not exists "pgcrypto";
 
-create type public.app_role as enum ('admin', 'manager', 'sales');
+create type public.app_role as enum ('admin', 'manager', 'sales', 'viewer');
 create type public.opportunity_status as enum ('open', 'won', 'lost');
 create type public.activity_kind as enum ('call', 'meeting', 'email', 'task', 'note');
 

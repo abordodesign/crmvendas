@@ -20,6 +20,10 @@ function normalizeAppRole(value: unknown): AppRole | null {
     return "sales";
   }
 
+  if (normalizedValue === "viewer" || normalizedValue === "acompanhamento") {
+    return "viewer";
+  }
+
   return null;
 }
 

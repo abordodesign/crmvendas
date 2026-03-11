@@ -1,11 +1,12 @@
-export const appRoles = ["admin", "manager", "sales"] as const;
+export const appRoles = ["admin", "manager", "sales", "viewer"] as const;
 
 export type AppRole = (typeof appRoles)[number];
 
 export const roleLabels: Record<AppRole, string> = {
   admin: "Master",
   manager: "Gestor",
-  sales: "Comercial"
+  sales: "Comercial",
+  viewer: "Acompanhamento"
 };
 
 const rolePermissions: Record<AppRole, string[]> = {
@@ -38,6 +39,11 @@ const rolePermissions: Record<AppRole, string[]> = {
     "dashboard:view",
     "opportunities:write",
     "tasks:write"
+  ],
+  viewer: [
+    "accounts:view",
+    "dashboard:view",
+    "team:view"
   ]
 };
 
