@@ -77,6 +77,8 @@ export function DashboardApp() {
   const [opportunityOptions, setOpportunityOptions] = useState<AgendaOpportunityOption[]>([]);
   const [agendaAccountId, setAgendaAccountId] = useState("");
   const [agendaOpportunityId, setAgendaOpportunityId] = useState("");
+  const [isExportingReport, setIsExportingReport] = useState(false);
+  const [reportFeedback, setReportFeedback] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -262,6 +264,44 @@ export function DashboardApp() {
     });
   }
 
+  async function handleExportDashboardPdf() {
+    if (isExportingReport) {
+      return;
+    }
+
+    setIsExportingReport(true);
+    setReportFeedback(null);
+
+    try {
+      const response = await fetch("/api/reports/dashboard-pdf", {
+        method: "GET",
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        setReportFeedback("Nao foi possivel exportar o PDF agora.");
+        return;
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const contentDisposition = response.headers.get("content-disposition") || "";
+      const matchedFileName = contentDisposition.match(/filename=\"?([^\";]+)\"?/i)?.[1];
+      anchor.href = url;
+      anchor.download = matchedFileName || `dashboard-relatorio-${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+      setReportFeedback("Relatorio PDF exportado.");
+    } catch {
+      setReportFeedback("Falha ao exportar o PDF.");
+    } finally {
+      setIsExportingReport(false);
+    }
+  }
+
   const filteredPipeline = useMemo(() => {
     const normalizedQuery = normalizeSearchText(searchQuery);
 
@@ -387,6 +427,14 @@ export function DashboardApp() {
         onClose={() => setAgendaItemPendingDelete(null)}
         onConfirm={confirmDeleteAgenda}
       />
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button type="button" onClick={() => void handleExportDashboardPdf()} disabled={isExportingReport} style={smallActionButtonStyle}>
+          {isExportingReport ? "Gerando PDF..." : "Exportar PDF"}
+        </button>
+      </div>
+      {reportFeedback ? (
+        <div style={{ color: "var(--accent)", fontSize: 13, fontWeight: 700, textAlign: "right" }}>{reportFeedback}</div>
+      ) : null}
       <section
         style={{
           display: "grid",
