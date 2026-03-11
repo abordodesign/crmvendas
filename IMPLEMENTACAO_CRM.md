@@ -81,6 +81,7 @@ Este documento registra o que foi analisado e implementado no sistema ate o mome
   - `admin`
   - `manager`
   - `sales`
+  - `viewer` (Acompanhamento, somente leitura)
 - Regras de permissao centralizadas em `hasPermission(...)`.
 - Ajuste para nao mascarar ausencia de perfil como `sales`.
 - Quando o perfil nao existe, a UI agora mostra `Sem perfil`.
@@ -94,7 +95,11 @@ Este documento registra o que foi analisado e implementado no sistema ate o mome
   - ja confirmado (`email_confirm: true`)
   - vinculado a mesma organizacao do admin atual
   - com `role` definido pelo formulario
-- Interface de criacao de usuarios da equipe em `components/settings-screen.tsx`.
+- Interface de equipe em `components/settings-screen.tsx` com:
+  - criacao de usuario
+  - listagem de usuarios cadastrados
+  - alteracao de papel (role)
+  - exclusao de usuario
 
 ## Persistencia e fonte de dados
 
@@ -104,6 +109,47 @@ Este documento registra o que foi analisado e implementado no sistema ate o mome
 - Configuracoes em `lib/crm-settings.ts`.
 - Seed local em `lib/crm-seed.ts`.
 - Tipos em `types/crm-app.ts`.
+
+### Agente de Pipeline e alertas
+
+- Motor de atencao com score por oportunidade em `getPipelineAttention(...)`.
+- Classificacao de risco por nivel:
+  - `critical`
+  - `high`
+  - `medium`
+  - `low`
+- Regras de risco:
+  - sem proximo passo em etapa avancada
+  - sem tarefa vinculada
+  - fechamento vencido ou proximo
+  - tempo sem interacao por etapa
+  - peso adicional para negocios de alto valor
+- Automacao diaria:
+  - `runPipelineAttentionAgent()`
+  - cria tarefas automaticas para casos prioritarios
+  - respeita horario, limite diario e feature flags
+- Historico de execucoes do agente:
+  - visual em Configuracoes
+  - fallback local + persistencia no Supabase
+- Documentacao funcional dedicada:
+  - `SISTEMA_ALERTAS_AGENTE_PIPELINE.md`
+
+### Feature flags recentes
+
+- Nova flag: `pipeline_agent_system`
+  - habilita/desabilita analise, alertas e automacoes do agente
+  - integrada ao painel de Configuracoes
+
+### Exportacao PDF (Dashboard)
+
+- Endpoint de relatorio executivo:
+  - `GET /api/reports/dashboard-pdf`
+- Botao `Exportar PDF` na dashboard.
+- Conteudo do relatorio:
+  - resumo de oportunidades
+  - pipeline por etapa
+  - situacao por risco
+  - tabela de oportunidades priorizadas
 
 ### Comportamento hibrido
 
@@ -121,16 +167,20 @@ Este documento registra o que foi analisado e implementado no sistema ate o mome
 - `supabase/migrations/20260304_0001_crm_data_completion.sql`
 - `supabase/migrations/20260304_0002_auth_bootstrap.sql`
 - `supabase/migrations/20260304_0003_security_and_grants.sql`
+- `supabase/migrations/20260310_0012_pipeline_agent_runs.sql`
+- `supabase/migrations/20260311_0013_app_role_viewer.sql`
 
 ### Ajustadas para idempotencia
 
 - `supabase/migrations/20260303_app_settings.sql`
 - `supabase/migrations/20260303_notifications.sql`
+- `supabase/migrations/20260304_0004_bootstrap_profile_repair.sql`
 
 ### O que essas migrations cobrem
 
 - Schema principal do CRM.
 - Tabelas auxiliares de configuracoes e notificacoes.
+- Tabela de historico do agente (`pipeline_agent_runs`).
 - RLS e politicas.
 - Grants para `authenticated` e `service_role`.
 - Funcoes:
@@ -163,9 +213,8 @@ Este documento registra o que foi analisado e implementado no sistema ate o mome
 
 ## Riscos e pontos ainda evolutiveis
 
-- O frontend ainda nao persiste todos os campos extras de clientes/oportunidades no banco em todos os fluxos.
-- Nao ha ainda listagem/gestao de usuarios da equipe alem da criacao.
-- Nao foi implementado ainda:
+- Ainda evolutivo:
   - redefinicao de senha de terceiros
-  - desativacao de usuarios
-  - listagem de membros da organizacao
+  - desativacao/bloqueio de usuarios sem exclusao
+  - filtros avancados e paginação na listagem de equipe
+  - agendamento automatico de envio periodico de PDF por e-mail
