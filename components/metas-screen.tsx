@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { CrmShell } from "@/components/crm-shell";
 import { getDashboardData, subscribeCrmDataChanged } from "@/lib/crm-data-source";
 import { seedDashboardData } from "@/lib/crm-seed";
+import { getCrmSettings, saveCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
 import type { DashboardData } from "@/types/crm-app";
-
-const GOAL_STORAGE_KEY = "crm_pipeline_goal_value";
 
 export function MetasScreen() {
   const [data, setData] = useState<DashboardData>(seedDashboardData);
   const [goalInput, setGoalInput] = useState("");
+  const [savedGoal, setSavedGoal] = useState(0);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
     let isMounted = true;
@@ -35,23 +37,29 @@ export function MetasScreen() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
+    let isMounted = true;
+
+    async function loadSettings() {
+      const settings = await getCrmSettings();
+
+      if (!isMounted) {
+        return;
+      }
+
+      setSavedGoal(settings.pipelineGoal);
+      setGoalInput(settings.pipelineGoal > 0 ? formatDecimalInput(settings.pipelineGoal) : "");
     }
 
-    const storedValue = window.localStorage.getItem(GOAL_STORAGE_KEY);
-    if (storedValue) {
-      setGoalInput(storedValue);
-    }
+    void loadSettings();
+    const unsubscribe = subscribeCrmSettingsChanged(() => {
+      void loadSettings();
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(GOAL_STORAGE_KEY, goalInput);
-  }, [goalInput]);
 
   const monthlyGoal = parseCurrencyInput(goalInput);
   const achievedRevenue = useMemo(
@@ -75,6 +83,26 @@ export function MetasScreen() {
     { label: "Pipeline Existente", value: existingPipeline, color: "#c2410c" }
   ];
 
+  const hasChanges = Math.abs(monthlyGoal - savedGoal) > 0.0001;
+
+  function handleSubmit() {
+    setFeedback(null);
+
+    startTransition(() => {
+      void (async () => {
+        const currentSettings = await getCrmSettings();
+        const nextGoal = Math.max(monthlyGoal, 0);
+        await saveCrmSettings({
+          ...currentSettings,
+          pipelineGoal: nextGoal
+        });
+        setSavedGoal(nextGoal);
+        setGoalInput(nextGoal > 0 ? formatDecimalInput(nextGoal) : "");
+        setFeedback("Meta salva no banco de dados.");
+      })();
+    });
+  }
+
   return (
     <CrmShell
       activePath="/dashboard/metas"
@@ -88,7 +116,7 @@ export function MetasScreen() {
             <div style={eyebrowStyle}>Saude do pipeline</div>
             <h2 style={titleStyle}>Meta editavel, leitura travada</h2>
             <div style={subtitleStyle}>
-              Apenas o campo de meta pode ser alterado. Conquistado, pipeline necessario, pipeline existente e saude ficam calculados automaticamente.
+              Apenas o campo de meta pode ser alterado. Os demais indicadores ficam travados e so atualizam quando voce salvar a nova meta.
             </div>
           </div>
           <div style={{ ...healthBadgeStyle, ...healthBadgeToneStyle(healthTone) }}>
@@ -98,7 +126,12 @@ export function MetasScreen() {
 
         <div style={metricsGridStyle}>
           <div style={formulaPanelStyle}>
-            <div style={formulaTitleStyle}>Calculo</div>
+            <div style={formulaHeaderStyle}>
+              <div style={formulaTitleStyle}>Calculo</div>
+              <button type="button" onClick={handleSubmit} disabled={!hasChanges || isPending} style={saveButtonStyle}>
+                {isPending ? "Salvando..." : "Salvar meta"}
+              </button>
+            </div>
             <div style={formulaGridStyle}>
               <MetricRow
                 label="Meta"
@@ -116,6 +149,11 @@ export function MetasScreen() {
               <MetricRow label="Conquistado" marker="-" value={<div style={metricValueStyle}>{formatCurrency(achievedRevenue)}</div>} />
               <MetricRow label="A Realizar" marker="=" value={<div style={metricValueStyle}>{formatCurrency(remainingRevenue)}</div>} />
             </div>
+            <div style={metaInfoRowStyle}>
+              <span style={metaInfoStyle}>Meta salva: {formatCurrency(savedGoal)}</span>
+              <span style={metaInfoStyle}>{hasChanges ? "Existem alteracoes pendentes" : "Sem alteracoes pendentes"}</span>
+            </div>
+            {feedback ? <div style={feedbackStyle}>{feedback}</div> : null}
           </div>
 
           <div style={multiplierWrapStyle}>
@@ -256,6 +294,13 @@ function formatPercent(value: number) {
   }).format(Math.max(0, value))}%`;
 }
 
+function formatDecimalInput(value: number) {
+  return new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(value);
+}
+
 function getHealthTone(value: number, goal: number) {
   if (goal <= 0) {
     return "neutral" as const;
@@ -362,12 +407,31 @@ const formulaPanelStyle: React.CSSProperties = {
   gap: 14
 };
 
+const formulaHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 12,
+  flexWrap: "wrap"
+};
+
 const formulaTitleStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 800,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
   color: "var(--muted)"
+};
+
+const saveButtonStyle: React.CSSProperties = {
+  minHeight: 40,
+  border: 0,
+  borderRadius: 12,
+  padding: "10px 14px",
+  background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)",
+  color: "#ffffff",
+  fontWeight: 800,
+  cursor: "pointer"
 };
 
 const formulaGridStyle: React.CSSProperties = {
@@ -466,6 +530,25 @@ const subtitleStyle: React.CSSProperties = {
   fontSize: 14,
   lineHeight: 1.6,
   maxWidth: 760
+};
+
+const metaInfoRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 10,
+  flexWrap: "wrap"
+};
+
+const metaInfoStyle: React.CSSProperties = {
+  color: "var(--muted)",
+  fontSize: 12,
+  fontWeight: 700
+};
+
+const feedbackStyle: React.CSSProperties = {
+  color: "#0f766e",
+  fontSize: 13,
+  fontWeight: 700
 };
 
 const healthBadgeStyle: React.CSSProperties = {

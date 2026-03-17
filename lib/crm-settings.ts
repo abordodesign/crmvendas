@@ -36,12 +36,14 @@ export type CrmSettings = {
   use24HourClock: boolean;
   features: Record<FeatureKey, boolean>;
   pipelineAgent: PipelineAgentSettings;
+  pipelineGoal: number;
 };
 
 const LOCAL_SETTINGS_KEY = "crm_system_settings";
 const SETTINGS_CHANGED_EVENT = "crm:settings-changed";
 const SETTINGS_CACHE_TTL_MS = 5000;
 const PIPELINE_AGENT_FEATURE_KEY = "__pipeline_agent";
+const PIPELINE_GOAL_FEATURE_KEY = "__pipeline_goal";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -118,7 +120,8 @@ export const defaultCrmSettings: CrmSettings = {
     history_module: true,
     pipeline_agent_system: true
   },
-  pipelineAgent: parsePipelineAgentSettings(null)
+  pipelineAgent: parsePipelineAgentSettings(null),
+  pipelineGoal: 0
 };
 
 type CurrentSettingsUserContext = {
@@ -182,7 +185,11 @@ function getLocalSettings() {
       },
       pipelineAgent: parsePipelineAgentSettings(
         parsed.pipelineAgent ?? pipelineAgentFromFeatures ?? defaultCrmSettings.pipelineAgent
-      )
+      ),
+      pipelineGoal:
+        typeof parsed.pipelineGoal === "number" && Number.isFinite(parsed.pipelineGoal) && parsed.pipelineGoal >= 0
+          ? parsed.pipelineGoal
+          : defaultCrmSettings.pipelineGoal
     };
   } catch {
     return defaultCrmSettings;
@@ -346,7 +353,15 @@ export async function getCrmSettings(): Promise<CrmSettings> {
         (typeof data.features === "object" && data.features
           ? (data.features as Record<string, unknown>)[PIPELINE_AGENT_FEATURE_KEY]
           : undefined) ?? local.pipelineAgent
-      )
+      ),
+      pipelineGoal:
+        typeof data.features === "object" &&
+        data.features &&
+        typeof (data.features as Record<string, unknown>)[PIPELINE_GOAL_FEATURE_KEY] === "number" &&
+        Number.isFinite((data.features as Record<string, unknown>)[PIPELINE_GOAL_FEATURE_KEY]) &&
+        Number((data.features as Record<string, unknown>)[PIPELINE_GOAL_FEATURE_KEY]) >= 0
+          ? Number((data.features as Record<string, unknown>)[PIPELINE_GOAL_FEATURE_KEY])
+          : local.pipelineGoal
     };
 
     saveLocalSettings(next, false);
@@ -370,7 +385,11 @@ export async function getCrmSettings(): Promise<CrmSettings> {
 export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSettings> {
   const normalizedSettings: CrmSettings = {
     ...settings,
-    pipelineAgent: parsePipelineAgentSettings(settings.pipelineAgent)
+    pipelineAgent: parsePipelineAgentSettings(settings.pipelineAgent),
+    pipelineGoal:
+      typeof settings.pipelineGoal === "number" && Number.isFinite(settings.pipelineGoal) && settings.pipelineGoal >= 0
+        ? settings.pipelineGoal
+        : defaultCrmSettings.pipelineGoal
   };
 
   currentSettingsCache = {
@@ -387,7 +406,8 @@ export async function saveCrmSettings(settings: CrmSettings): Promise<CrmSetting
 
   const featuresPayload: Record<string, unknown> = {
     ...normalizedSettings.features,
-    [PIPELINE_AGENT_FEATURE_KEY]: normalizedSettings.pipelineAgent
+    [PIPELINE_AGENT_FEATURE_KEY]: normalizedSettings.pipelineAgent,
+    [PIPELINE_GOAL_FEATURE_KEY]: normalizedSettings.pipelineGoal
   };
 
   const { error } = await supabase.from("app_settings").upsert(
