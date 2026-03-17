@@ -12,6 +12,8 @@ export function MetasScreen() {
   const [goalInput, setGoalInput] = useState("");
   const [savedGoal, setSavedGoal] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [hoveredChartLabel, setHoveredChartLabel] = useState<string | null>(null);
+  const [hoveredSummaryLabel, setHoveredSummaryLabel] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -77,10 +79,10 @@ export function MetasScreen() {
   const chartMax = Math.max(monthlyGoal, achievedRevenue, requiredPipeline, existingPipeline, 1);
 
   const chartItems = [
-    { label: "Meta", value: monthlyGoal, color: "#1d4ed8" },
-    { label: "Conquistado", value: achievedRevenue, color: "#0f766e" },
-    { label: "Pipeline Necessario", value: requiredPipeline, color: "#7c3aed" },
-    { label: "Pipeline Existente", value: existingPipeline, color: "#c2410c" }
+    { label: "Meta", value: monthlyGoal, color: "#8fb7ff", glow: "rgba(143, 183, 255, 0.28)" },
+    { label: "Conquistado", value: achievedRevenue, color: "#98d8cb", glow: "rgba(152, 216, 203, 0.28)" },
+    { label: "Pipeline Necessario", value: requiredPipeline, color: "#cbb8f5", glow: "rgba(203, 184, 245, 0.28)" },
+    { label: "Pipeline Existente", value: existingPipeline, color: "#f4c8aa", glow: "rgba(244, 200, 170, 0.28)" }
   ];
 
   const hasChanges = Math.abs(monthlyGoal - savedGoal) > 0.0001;
@@ -181,10 +183,35 @@ export function MetasScreen() {
             </div>
           </div>
           <div style={summaryGridStyle}>
-            <SummaryCard label="Meta mensal" value={formatCurrency(monthlyGoal)} detail="Valor alvo informado manualmente." />
-            <SummaryCard label="Ja conquistado" value={formatCurrency(achievedRevenue)} detail="Receita fechada no mes atual." />
-            <SummaryCard label="Falta realizar" value={formatCurrency(remainingRevenue)} detail="Meta menos o que ja foi conquistado." />
-            <SummaryCard label="Saude travada" value={formatPercent(pipelineHealth)} detail="Leitura automatica do pipeline em relacao a meta." tone={healthTone} />
+            <SummaryCard
+              label="Meta mensal"
+              value={formatCurrency(monthlyGoal)}
+              detail="Valor alvo informado manualmente."
+              isHovered={hoveredSummaryLabel === "Meta mensal"}
+              onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Meta mensal" : null)}
+            />
+            <SummaryCard
+              label="Ja conquistado"
+              value={formatCurrency(achievedRevenue)}
+              detail="Receita fechada no mes atual."
+              isHovered={hoveredSummaryLabel === "Ja conquistado"}
+              onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Ja conquistado" : null)}
+            />
+            <SummaryCard
+              label="Falta realizar"
+              value={formatCurrency(remainingRevenue)}
+              detail="Meta menos o que ja foi conquistado."
+              isHovered={hoveredSummaryLabel === "Falta realizar"}
+              onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Falta realizar" : null)}
+            />
+            <SummaryCard
+              label="Saude travada"
+              value={formatPercent(pipelineHealth)}
+              detail="Leitura automatica do pipeline em relacao a meta."
+              tone={healthTone}
+              isHovered={hoveredSummaryLabel === "Saude travada"}
+              onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Saude travada" : null)}
+            />
           </div>
         </article>
 
@@ -198,15 +225,32 @@ export function MetasScreen() {
           <div style={chartStyle}>
             {chartItems.map((item) => {
               const barHeight = `${Math.max((item.value / chartMax) * 100, item.value > 0 ? 8 : 0)}%`;
+              const isHovered = hoveredChartLabel === item.label;
 
               return (
-                <div key={item.label} style={chartColumnStyle}>
-                  <div style={chartTrackStyle}>
+                <div
+                  key={item.label}
+                  style={{
+                    ...chartColumnStyle,
+                    transform: isHovered ? "translateY(-4px)" : "translateY(0)",
+                    transition: "transform 180ms ease"
+                  }}
+                  onMouseEnter={() => setHoveredChartLabel(item.label)}
+                  onMouseLeave={() => setHoveredChartLabel(null)}
+                >
+                  <div
+                    style={{
+                      ...chartTrackStyle,
+                      borderColor: isHovered ? item.glow : "rgba(148, 163, 184, 0.18)",
+                      boxShadow: isHovered ? `0 18px 32px ${item.glow}` : "none"
+                    }}
+                  >
                     <div
                       style={{
                         ...chartBarStyle,
                         height: barHeight,
-                        background: `linear-gradient(180deg, ${item.color} 0%, ${item.color}cc 100%)`
+                        background: `linear-gradient(180deg, ${item.color} 0%, #ffffff 120%)`,
+                        boxShadow: isHovered ? `0 10px 20px ${item.glow}` : "none"
                       }}
                     />
                   </div>
@@ -244,15 +288,28 @@ function SummaryCard({
   label,
   value,
   detail,
-  tone = "neutral"
+  tone = "neutral",
+  isHovered = false,
+  onHoverChange
 }: {
   label: string;
   value: string;
   detail: string;
   tone?: ReturnType<typeof getHealthTone>;
+  isHovered?: boolean;
+  onHoverChange?: (hovered: boolean) => void;
 }) {
   return (
-    <div style={{ ...summaryCardStyle, ...summaryToneStyle(tone) }}>
+    <div
+      style={{
+        ...summaryCardStyle,
+        ...summaryToneStyle(tone),
+        transform: isHovered ? "translateY(-3px)" : "translateY(0)",
+        boxShadow: isHovered ? "0 16px 28px rgba(148, 163, 184, 0.14)" : "none"
+      }}
+      onMouseEnter={() => onHoverChange?.(true)}
+      onMouseLeave={() => onHoverChange?.(false)}
+    >
       <div style={summaryLabelStyle}>{label}</div>
       <div style={summaryValueStyle}>{value}</div>
       <div style={summaryDetailStyle}>{detail}</div>
@@ -386,7 +443,8 @@ const panelStyle: React.CSSProperties = {
   padding: 20,
   borderRadius: 28,
   background: "#ffffff",
-  border: "1px solid var(--line)"
+  border: "1px solid var(--line)",
+  boxShadow: "0 12px 24px rgba(148, 163, 184, 0.08)"
 };
 
 const contentGridStyle: React.CSSProperties = {
@@ -428,10 +486,11 @@ const saveButtonStyle: React.CSSProperties = {
   border: 0,
   borderRadius: 12,
   padding: "10px 14px",
-  background: "linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%)",
-  color: "#ffffff",
+  background: "linear-gradient(135deg, #dbeafe 0%, #e9f4ff 100%)",
+  color: "#355070",
   fontWeight: 800,
-  cursor: "pointer"
+  cursor: "pointer",
+  boxShadow: "0 10px 20px rgba(143, 183, 255, 0.18)"
 };
 
 const formulaGridStyle: React.CSSProperties = {
@@ -475,8 +534,8 @@ const metricInputStyle: React.CSSProperties = {
 const metricValueStyle: React.CSSProperties = {
   minHeight: 44,
   borderRadius: 14,
-  border: "1px solid #d9d1c4",
-  background: "#f3f0ea",
+  border: "1px solid #e5e7eb",
+  background: "#f8fafc",
   padding: "10px 12px",
   display: "flex",
   alignItems: "center",
@@ -546,7 +605,7 @@ const metaInfoStyle: React.CSSProperties = {
 };
 
 const feedbackStyle: React.CSSProperties = {
-  color: "#0f766e",
+  color: "#5d7a75",
   fontSize: 13,
   fontWeight: 700
 };
@@ -577,10 +636,11 @@ const summaryGridStyle: React.CSSProperties = {
 const summaryCardStyle: React.CSSProperties = {
   padding: 16,
   borderRadius: 20,
-  background: "var(--surface-elevated)",
+  background: "#fcfdff",
   border: "1px solid var(--line)",
   display: "grid",
-  gap: 8
+  gap: 8,
+  transition: "transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease"
 };
 
 const summaryLabelStyle: React.CSSProperties = {
@@ -608,7 +668,7 @@ const chartStyle: React.CSSProperties = {
   minHeight: 320,
   borderRadius: 22,
   border: "1px solid var(--line)",
-  background: "linear-gradient(180deg, rgba(79, 70, 229, 0.04) 0%, rgba(255,255,255,0.9) 100%)",
+  background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
   padding: 18,
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -626,17 +686,19 @@ const chartColumnStyle: React.CSSProperties = {
 const chartTrackStyle: React.CSSProperties = {
   height: 220,
   borderRadius: 16,
-  background: "rgba(148, 163, 184, 0.12)",
+  background: "linear-gradient(180deg, #f8fafc 0%, #fdfefe 100%)",
   border: "1px solid rgba(148, 163, 184, 0.18)",
   display: "flex",
   alignItems: "flex-end",
-  padding: 10
+  padding: 10,
+  transition: "border-color 180ms ease, box-shadow 180ms ease"
 };
 
 const chartBarStyle: React.CSSProperties = {
   width: "100%",
   minHeight: 0,
-  borderRadius: 10
+  borderRadius: 10,
+  transition: "height 180ms ease, box-shadow 180ms ease, transform 180ms ease"
 };
 
 const chartValueStyle: React.CSSProperties = {
