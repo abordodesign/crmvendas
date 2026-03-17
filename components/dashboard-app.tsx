@@ -52,13 +52,10 @@ const emptyAttention: PipelineAttentionData = {
   items: []
 };
 
-const DASHBOARD_GOAL_STORAGE_KEY = "crm_dashboard_goal_value";
-
 export function DashboardApp() {
   const [settings, setSettings] = useState(defaultCrmSettings);
   const [data, setData] = useState<DashboardData>(seedDashboardData);
   const [attention, setAttention] = useState<PipelineAttentionData>(emptyAttention);
-  const [goalInput, setGoalInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [filterIndex, setFilterIndex] = useState(0);
   const [sortIndex, setSortIndex] = useState(0);
@@ -113,25 +110,6 @@ export function DashboardApp() {
       unsubscribe();
     };
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const storedGoal = window.localStorage.getItem(DASHBOARD_GOAL_STORAGE_KEY);
-    if (storedGoal) {
-      setGoalInput(storedGoal);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(DASHBOARD_GOAL_STORAGE_KEY, goalInput);
-  }, [goalInput]);
 
   useEffect(() => {
     void runPipelineAttentionAgent();
@@ -190,20 +168,6 @@ export function DashboardApp() {
   const activeSort = SORT_MODES[sortIndex];
   const isDragDropEnabled = settings.features.pipeline_drag_drop;
   const isAgendaEnabled = settings.features.agenda_module;
-  const monthlyGoal = currencyInputToNumber(goalInput);
-  const achievedRevenue = currencyToNumber(data.kpis.find((item) => item.label === "Receita do mes")?.value ?? "R$ 0,00");
-  const existingPipeline = useMemo(
-    () => data.pipeline.reduce((sum, column) => sum + currencyToNumber(column.total), 0),
-    [data.pipeline]
-  );
-  const remainingRevenue = Math.max(monthlyGoal - achievedRevenue, 0);
-  const requiredPipeline = remainingRevenue * 3;
-  const pipelineHealth =
-    requiredPipeline <= 0
-      ? monthlyGoal > 0 && achievedRevenue >= monthlyGoal
-        ? 100
-        : 0
-      : (existingPipeline / requiredPipeline) * 100;
 
   function resetAgendaForm() {
     setEditingAgendaId(null);
@@ -516,76 +480,6 @@ export function DashboardApp() {
             </div>
           </article>
         ))}
-      </section>
-
-      <section
-        style={{
-          padding: 20,
-          borderRadius: 28,
-          background: "#ffffff",
-          border: "1px solid var(--line)"
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-            flexWrap: "wrap"
-          }}
-        >
-          <div>
-            <div style={goalEyebrowStyle}>Metas</div>
-            <h2 style={{ margin: "8px 0 0", fontSize: "1.15rem" }}>Saude do Pipeline</h2>
-          </div>
-          <div style={goalHintStyle}>A meta digitada gera automaticamente a leitura do funil.</div>
-        </div>
-
-        <div
-          style={{
-            marginTop: 18,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-            gap: 18,
-            alignItems: "center"
-          }}
-        >
-          <div style={{ display: "grid", gap: 14 }}>
-            <GoalMetricRow
-              label="Meta"
-              suffix="+"
-              value={
-                <input
-                  value={goalInput}
-                  onChange={(event) => setGoalInput(event.target.value)}
-                  placeholder="0,00"
-                  inputMode="decimal"
-                  style={goalInputStyle}
-                />
-              }
-            />
-            <GoalMetricRow label="Conquistado" suffix="-" value={<div style={goalValueBoxStyle}>{formatCurrency(achievedRevenue)}</div>} />
-            <GoalMetricRow label="A Realizar" suffix="=" value={<div style={goalValueBoxStyle}>{formatCurrency(remainingRevenue)}</div>} />
-          </div>
-
-          <div style={goalMultiplierWrapStyle}>
-            <div style={goalBracketStyle} />
-            <div style={goalMultiplierStyle}>x 3</div>
-          </div>
-
-          <div style={{ display: "grid", gap: 14 }}>
-            <GoalMetricRow
-              label="Pipeline Necessario"
-              value={<div style={goalValueBoxStyle}>{formatCurrency(requiredPipeline)}</div>}
-            />
-            <GoalMetricRow
-              label="Pipeline Existente"
-              value={<div style={goalValueBoxStyle}>{formatCurrency(existingPipeline)}</div>}
-            />
-            <GoalMetricRow label="Saude do Pipeline" value={<div style={goalValueBoxStyle}>{formatPercentValue(pipelineHealth)}</div>} />
-          </div>
-        </div>
       </section>
 
       <section
@@ -1447,31 +1341,6 @@ function DashboardConfirmField({ label, value }: { label: string; value: string 
   );
 }
 
-function GoalMetricRow({
-  label,
-  value,
-  suffix
-}: {
-  label: string;
-  value: React.ReactNode;
-  suffix?: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "96px 20px minmax(0, 1fr)",
-        gap: 8,
-        alignItems: "center"
-      }}
-    >
-      <div style={goalLabelStyle}>{label}</div>
-      <div style={goalSuffixStyle}>{suffix ?? ""}</div>
-      {value}
-    </div>
-  );
-}
-
 function normalizeSearchText(value: string) {
   return value
     .normalize("NFD")
@@ -1486,18 +1355,6 @@ function currencyToNumber(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function currencyInputToNumber(value: string) {
-  if (!value.trim()) {
-    return 0;
-  }
-
-  const sanitized = value.replace(/[^\d,.-]/g, "");
-  const hasComma = sanitized.includes(",");
-  const normalized = hasComma ? sanitized.replace(/\./g, "").replace(",", ".") : sanitized.replace(",", ".");
-  const numeric = Number(normalized);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -1505,13 +1362,6 @@ function formatCurrency(value: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(value);
-}
-
-function formatPercentValue(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(Math.max(0, value));
 }
 
 function priorityColor(priority: string) {
@@ -1559,78 +1409,6 @@ const controlSelectStyle: React.CSSProperties = {
   font: "inherit",
   fontWeight: 700,
   cursor: "pointer"
-};
-
-const goalEyebrowStyle: React.CSSProperties = {
-  color: "var(--muted)",
-  fontSize: 10,
-  fontWeight: 800,
-  letterSpacing: "0.08em",
-  textTransform: "uppercase"
-};
-
-const goalHintStyle: React.CSSProperties = {
-  color: "var(--muted)",
-  fontSize: 13,
-  lineHeight: 1.5
-};
-
-const goalLabelStyle: React.CSSProperties = {
-  color: "var(--foreground)",
-  fontSize: 14,
-  fontWeight: 700
-};
-
-const goalSuffixStyle: React.CSSProperties = {
-  color: "var(--muted)",
-  fontSize: 20,
-  fontWeight: 700,
-  textAlign: "center"
-};
-
-const goalInputStyle: React.CSSProperties = {
-  ...searchInputStyle,
-  minWidth: 0,
-  width: "100%",
-  textAlign: "right",
-  fontWeight: 700
-};
-
-const goalValueBoxStyle: React.CSSProperties = {
-  minHeight: 42,
-  borderRadius: 0,
-  border: "1px solid #cfc7ba",
-  background: "#f3f0ea",
-  padding: "10px 12px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "flex-end",
-  fontWeight: 700
-};
-
-const goalMultiplierWrapStyle: React.CSSProperties = {
-  display: "grid",
-  justifyItems: "center",
-  alignItems: "center",
-  gap: 10,
-  minWidth: 56
-};
-
-const goalBracketStyle: React.CSSProperties = {
-  width: 22,
-  height: 144,
-  borderTop: "3px solid var(--foreground)",
-  borderBottom: "3px solid var(--foreground)",
-  borderLeft: "3px solid var(--foreground)",
-  borderTopLeftRadius: 14,
-  borderBottomLeftRadius: 14,
-  justifySelf: "end"
-};
-
-const goalMultiplierStyle: React.CSSProperties = {
-  color: "var(--foreground)",
-  fontSize: 18,
-  fontWeight: 800
 };
 
 const smallActionButtonStyle: React.CSSProperties = {

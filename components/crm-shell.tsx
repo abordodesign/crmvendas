@@ -20,6 +20,7 @@ import type { NotificationItem } from "@/types/crm-app";
 type CrmShellProps = {
   activePath:
     | "/dashboard"
+    | "/dashboard/metas"
     | "/dashboard/statistics"
     | "/dashboard/prospecting"
     | "/dashboard/prospecting-free"
@@ -39,6 +40,7 @@ type CrmShellProps = {
 type NavItem = {
   href:
     | "/dashboard"
+    | "/dashboard/metas"
     | "/dashboard/statistics"
     | "/dashboard/prospecting"
     | "/dashboard/prospecting-free"
@@ -56,6 +58,7 @@ const isGooglePlacesProspectingEnabled = process.env.NEXT_PUBLIC_ENABLE_GOOGLE_P
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard/metas", label: "Metas" },
   { href: "/dashboard/statistics", label: "Estatisticas" },
   { href: "/dashboard/prospecting-free", label: "Prospeccao Gratis" },
   { href: "/dashboard/agenda", label: "Agenda" },
