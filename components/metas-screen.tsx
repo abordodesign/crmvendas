@@ -624,7 +624,7 @@ const chartColumnStyle: React.CSSProperties = {
 };
 
 const chartTrackStyle: React.CSSProperties = {
-  minHeight: 220,
+  height: 220,
   borderRadius: 16,
   background: "rgba(148, 163, 184, 0.12)",
   border: "1px solid rgba(148, 163, 184, 0.18)",
