@@ -18,6 +18,7 @@ const emptyStatistics: PipelineStatistics = {
   opportunitiesCount: 0,
   proposalsCount: 0,
   salesCount: 0,
+  lostRevenue: 0,
   totalPipeline: 0,
   weightedPipeline: 0,
   averageProbability: 0,
@@ -178,6 +179,11 @@ export function StatisticsScreen() {
             label="Faturamento previsto"
             value={formatCurrency(stats.forecastMonth)}
             detail="Valor ponderado das oportunidades com fechamento neste mes."
+          />
+          <MetricCard
+            label="Oportunidades perdidas"
+            value={formatCurrency(stats.lostRevenue)}
+            detail={`Valor total perdido em ${activePeriod.label}.`}
           />
           <MetricCard
             label="Pipeline ponderado"

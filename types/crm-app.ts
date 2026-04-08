@@ -129,6 +129,7 @@ export type PipelineStatistics = {
   opportunitiesCount: number;
   proposalsCount: number;
   salesCount: number;
+  lostRevenue: number;
   totalPipeline: number;
   weightedPipeline: number;
   averageProbability: number;

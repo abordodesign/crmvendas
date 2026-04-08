@@ -971,6 +971,9 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], peri
   const totalPipeline = openItems.reduce((sum, item) => sum + item.amount, 0);
   const weightedPipeline = openItems.reduce((sum, item) => sum + item.amount * (item.probability / 100), 0);
   const averageProbability = totalPipeline > 0 ? Math.round((weightedPipeline / totalPipeline) * 100) : 0;
+  const lostRevenue = periodItems
+    .filter((item) => mapUiOpportunityStatusToDb(item.status) === "lost")
+    .reduce((sum, item) => sum + item.amount, 0);
   const dueThisMonth = openItems.filter((item) => {
     const parsed = item.expectedCloseDate ? new Date(item.expectedCloseDate) : null;
 
@@ -1040,6 +1043,7 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], peri
     opportunitiesCount: periodValidItems.filter((item) => stageProgressIndex(item.stage) >= 1).length,
     proposalsCount: periodValidItems.filter((item) => stageProgressIndex(item.stage) >= 3).length,
     salesCount: periodItems.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length,
+    lostRevenue,
     totalPipeline,
     weightedPipeline,
     averageProbability,
