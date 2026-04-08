@@ -44,3 +44,16 @@ button,
 input {
   font: inherit;
 }
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+textarea {
+  resize: vertical;
+}

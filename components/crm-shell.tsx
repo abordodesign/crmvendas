@@ -268,10 +268,11 @@ export function CrmShell({
     };
   }, []);
 
+  const visibleNotifications = settings.features.notifications_center ? notifications : [];
   const filteredNotifications =
     notificationModuleFilter === "all"
-      ? notifications
-      : notifications.filter((item) => item.label === notificationModuleFilter);
+      ? visibleNotifications
+      : visibleNotifications.filter((item) => item.label === notificationModuleFilter);
   const unreadNotifications = filteredNotifications.filter((item) => !item.isRead);
   const unreadByPriority = {
     high: unreadNotifications.filter((item) => item.priority === "high"),
@@ -285,8 +286,6 @@ export function CrmShell({
     let timeoutId: number | null = null;
 
     if (!settings.features.notifications_center) {
-      setNotifications([]);
-
       return () => {
         isMounted = false;
 

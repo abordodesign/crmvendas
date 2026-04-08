@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { CrmShell } from "@/components/crm-shell";
 import {
   clearCrmOperationalData,
@@ -136,7 +136,7 @@ export function SettingsScreen() {
     };
   }, []);
 
-  async function loadTeamMembers() {
+  const loadTeamMembers = useCallback(async () => {
     if (role !== "admin") {
       setTeamMembers([]);
       return;
@@ -167,13 +167,13 @@ export function SettingsScreen() {
     } finally {
       setIsLoadingTeamMembers(false);
     }
-  }
+  }, [role]);
 
   useEffect(() => {
     if (role === "admin") {
       void loadTeamMembers();
     }
-  }, [role]);
+  }, [loadTeamMembers, role]);
 
   const activeFeatureCount = useMemo(
     () => featureDefinitions.filter((feature) => Boolean(draftSettings.features[feature.key])).length,

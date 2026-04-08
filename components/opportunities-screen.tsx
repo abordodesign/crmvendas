@@ -105,7 +105,13 @@ export function OpportunitiesScreen() {
       unsubscribe();
     };
   }, []);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [focusId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return new URLSearchParams(window.location.search).get("focus");
+  });
   const [isPending, startTransition] = useTransition();
   const [isNotePending, startNoteTransition] = useTransition();
 
@@ -148,15 +154,6 @@ export function OpportunitiesScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    setFocusId(params.get("focus"));
-  }, []);
-
   const totalAmount = useMemo(
     () => opportunities.reduce((sum, item) => sum + amountToNumber(item.amount), 0),
     [opportunities]
@@ -189,6 +186,10 @@ export function OpportunitiesScreen() {
   }, [hasManualProbability, manualProbability, selectedStageProbability]);
   const showConclusionFields = isConclusionStage(selectedStageLabel);
   const shouldShowConclusionFields = showConclusionFields || isConclusionMode;
+  const resolvedConclusionStatus = shouldShowConclusionFields ? conclusionStatus || CONCLUSION_STATUS_OPTIONS[0]?.id || "" : "";
+  const resolvedConclusionReason = shouldShowConclusionFields ? conclusionReason || CONCLUSION_REASON_OPTIONS[0]?.id || "" : "";
+  const resolvedConclusionDate =
+    shouldShowConclusionFields ? conclusionDate || new Date().toISOString().slice(0, 10) : "";
   const boardColumns = useMemo(
     () =>
       STAGE_FLOW.map((stageLabel) => {
@@ -203,19 +204,6 @@ export function OpportunitiesScreen() {
       }),
     [opportunities]
   );
-  useEffect(() => {
-    if (shouldShowConclusionFields) {
-      setConclusionStatus((current) => current || CONCLUSION_STATUS_OPTIONS[0]?.id || "");
-      setConclusionReason((current) => current || CONCLUSION_REASON_OPTIONS[0]?.id || "");
-      setConclusionDate((current) => current || new Date().toISOString().slice(0, 10));
-      return;
-    }
-
-    setConclusionStatus("");
-    setConclusionReason("");
-    setConclusionDate("");
-  }, [shouldShowConclusionFields]);
-
   useEffect(() => {
     if (!recentlyMovedOpportunityId) {
       return;
@@ -437,7 +425,7 @@ export function OpportunitiesScreen() {
 
       startTransition(() => {
         void (async () => {
-          const nextStatus = showConclusionFields ? conclusionStatus || "Conquistado" : "Em andamento";
+          const nextStatus = showConclusionFields ? resolvedConclusionStatus || "Conquistado" : "Em andamento";
           const updated = await updateOpportunity({
             id: editingId,
             title: service,
@@ -452,9 +440,9 @@ export function OpportunitiesScreen() {
             probability: hasManualProbability ? effectiveProbability : undefined,
             expectedCloseDate,
             status: nextStatus,
-            conclusionStatus: showConclusionFields ? conclusionStatus : undefined,
-            conclusionReason: showConclusionFields ? conclusionReason : undefined,
-            concludedAt: showConclusionFields ? `${conclusionDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z` : undefined,
+            conclusionStatus: showConclusionFields ? resolvedConclusionStatus : undefined,
+            conclusionReason: showConclusionFields ? resolvedConclusionReason : undefined,
+            concludedAt: showConclusionFields ? `${resolvedConclusionDate}T00:00:00.000Z` : undefined,
             currentCompany: currentRecord.company,
             currentStage: currentRecord.stage
           });
@@ -493,7 +481,7 @@ export function OpportunitiesScreen() {
           const selectedAccount = accounts.find((item) => item.id === accountId);
           const selectedStage =
             stages.find((item) => item.id === stageId) ?? DEFAULT_STAGE_OPTIONS.find((item) => item.id === stageId);
-          const nextStatus = showConclusionFields ? conclusionStatus || "Conquistado" : "Em andamento";
+          const nextStatus = showConclusionFields ? resolvedConclusionStatus || "Conquistado" : "Em andamento";
           const normalizedAccountId =
             !nextAccountId || nextAccountId === NEW_ACCOUNT_OPTION || nextAccountId.startsWith("local-customer-")
               ? ""
@@ -511,9 +499,9 @@ export function OpportunitiesScreen() {
           probability: hasManualProbability ? effectiveProbability : undefined,
           expectedCloseDate,
           status: nextStatus,
-            conclusionStatus: showConclusionFields ? conclusionStatus : undefined,
-            conclusionReason: showConclusionFields ? conclusionReason : undefined,
-            concludedAt: showConclusionFields ? `${conclusionDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z` : undefined,
+            conclusionStatus: showConclusionFields ? resolvedConclusionStatus : undefined,
+            conclusionReason: showConclusionFields ? resolvedConclusionReason : undefined,
+            concludedAt: showConclusionFields ? `${resolvedConclusionDate}T00:00:00.000Z` : undefined,
             accountLabel: nextAccountLabel ?? selectedAccount?.label,
             stageLabel: selectedStage?.label
           });
@@ -615,10 +603,10 @@ export function OpportunitiesScreen() {
           months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
           probability: hasManualProbability ? effectiveProbability : undefined,
           expectedCloseDate,
-          status: conclusionStatus || "Conquistado",
-          conclusionStatus: conclusionStatus || "Conquistado",
-          conclusionReason: conclusionReason || undefined,
-          concludedAt: `${conclusionDate || new Date().toISOString().slice(0, 10)}T00:00:00.000Z`,
+          status: resolvedConclusionStatus || "Conquistado",
+          conclusionStatus: resolvedConclusionStatus || "Conquistado",
+          conclusionReason: resolvedConclusionReason || undefined,
+          concludedAt: `${resolvedConclusionDate}T00:00:00.000Z`,
           currentCompany: currentRecord.company,
           currentStage: currentRecord.stage
         });
@@ -772,11 +760,11 @@ export function OpportunitiesScreen() {
         expectedCloseDate={expectedCloseDate}
         onExpectedCloseDateChange={setExpectedCloseDate}
         showConclusionFields={showConclusionFields}
-        conclusionStatus={conclusionStatus}
+        conclusionStatus={resolvedConclusionStatus}
         onConclusionStatusChange={setConclusionStatus}
-        conclusionReason={conclusionReason}
+        conclusionReason={resolvedConclusionReason}
         onConclusionReasonChange={setConclusionReason}
-        conclusionDate={conclusionDate}
+        conclusionDate={resolvedConclusionDate}
         onConclusionDateChange={setConclusionDate}
         calculatedTicket={calculatedTicket}
         onEnableEdit={() => setIsViewMode(false)}
@@ -2479,25 +2467,6 @@ function MetricCard({ label, value }: { label: string; value: string }) {
         {value}
       </div>
     </article>
-  );
-}
-
-function DataCell({
-  label,
-  value,
-  emphasis = false
-}: {
-  label: string;
-  value: string;
-  emphasis?: boolean;
-}) {
-  return (
-    <div>
-      <div style={{ color: "var(--muted)", fontSize: 12, fontWeight: 700 }}>{label}</div>
-      <div style={{ marginTop: 6, fontWeight: emphasis ? 800 : 700, color: emphasis ? "var(--accent)" : "inherit" }}>
-        {value}
-      </div>
-    </div>
   );
 }
 

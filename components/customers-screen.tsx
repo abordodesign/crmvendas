@@ -33,7 +33,13 @@ export function CustomersScreen() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [customerPendingDelete, setCustomerPendingDelete] = useState<CustomerItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [focusId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return new URLSearchParams(window.location.search).get("focus");
+  });
   const [searchTerm, setSearchTerm] = useState("");
   const [segmentFilter, setSegmentFilter] = useState("all");
   const [ownerFilter, setOwnerFilter] = useState("all");
@@ -66,15 +72,6 @@ export function CustomersScreen() {
     return () => {
       isMounted = false;
     };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    setFocusId(params.get("focus"));
   }, []);
 
   function handleCreateCustomer(event: React.FormEvent<HTMLFormElement>) {

@@ -13,13 +13,14 @@ import {
 type NotificationCenterItem = Awaited<ReturnType<typeof getNotificationCenterItems>>[number];
 
 const moduleOptions = ["Todos", "Agenda", "Tarefa", "Funil", "Fechamento"] as const;
-const priorityOptions = ["Todas", "high", "medium", "info"] as const;
+type PriorityFilter = "Todas" | "high" | "medium" | "info";
+const priorityOptions: PriorityFilter[] = ["Todas", "high", "medium", "info"];
 const statusOptions = ["Ativas", "Lidas", "Resolvidas", "Todas"] as const;
 
 export function NotificationsScreen() {
   const [items, setItems] = useState<NotificationCenterItem[]>([]);
   const [moduleFilter, setModuleFilter] = useState<(typeof moduleOptions)[number]>("Todos");
-  const [priorityFilter, setPriorityFilter] = useState<(typeof priorityOptions)[number]>("Todas");
+  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>("Todas");
   const [statusFilter, setStatusFilter] = useState<(typeof statusOptions)[number]>("Ativas");
 
   useEffect(() => {
@@ -111,13 +112,14 @@ export function NotificationsScreen() {
             </select>
             <select
               value={priorityFilter}
-              onChange={(event) => setPriorityFilter(event.target.value as (typeof priorityOptions)[number])}
+              onChange={(event) => setPriorityFilter(event.target.value as PriorityFilter)}
               style={filterSelectStyle}
             >
-              <option value="Todas">Todas prioridades</option>
-              <option value="high">Alta</option>
-              <option value="medium">Media</option>
-              <option value="info">Info</option>
+              {priorityOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option === "Todas" ? "Todas prioridades" : option === "high" ? "Alta" : option === "medium" ? "Media" : "Info"}
+                </option>
+              ))}
             </select>
             <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as (typeof statusOptions)[number])} style={filterSelectStyle}>
               {statusOptions.map((option) => (

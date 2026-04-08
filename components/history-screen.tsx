@@ -29,6 +29,7 @@ export function HistoryScreen() {
   const [actorFilter, setActorFilter] = useState("all");
   const [periodFilter, setPeriodFilter] = useState("7d");
   const [page, setPage] = useState(1);
+  const [referenceNow] = useState(() => Date.now());
 
   useEffect(() => {
     let isMounted = true;
@@ -59,7 +60,6 @@ export function HistoryScreen() {
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = normalizeSearchText(searchQuery);
-    const now = Date.now();
 
     return items.filter((item) => {
       const itemType = item.eventType ?? classifyActivity(item);
@@ -72,17 +72,13 @@ export function HistoryScreen() {
       const matchesPeriod =
         periodFilter === "all" ||
         !itemTime ||
-        (periodFilter === "today" && now - itemTime <= 24 * 60 * 60 * 1000) ||
-        (periodFilter === "7d" && now - itemTime <= 7 * 24 * 60 * 60 * 1000) ||
-        (periodFilter === "30d" && now - itemTime <= 30 * 24 * 60 * 60 * 1000);
+        (periodFilter === "today" && referenceNow - itemTime <= 24 * 60 * 60 * 1000) ||
+        (periodFilter === "7d" && referenceNow - itemTime <= 7 * 24 * 60 * 60 * 1000) ||
+        (periodFilter === "30d" && referenceNow - itemTime <= 30 * 24 * 60 * 60 * 1000);
 
       return matchesType && matchesActor && matchesQuery && matchesPeriod;
     });
-  }, [actorFilter, items, periodFilter, searchQuery, typeFilter]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [searchQuery, typeFilter, actorFilter, periodFilter]);
+  }, [actorFilter, items, periodFilter, referenceNow, searchQuery, typeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
   const pagedItems = useMemo(() => {
@@ -116,7 +112,10 @@ export function HistoryScreen() {
             <span style={controlLabelStyle}>Buscar</span>
             <input
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setPage(1);
+              }}
               placeholder="Buscar por usuario, acao ou alvo"
               style={controlInputStyle}
             />
@@ -124,7 +123,14 @@ export function HistoryScreen() {
 
           <label style={controlFieldStyle}>
             <span style={controlLabelStyle}>Tipo</span>
-            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)} style={controlInputStyle}>
+            <select
+              value={typeFilter}
+              onChange={(event) => {
+                setTypeFilter(event.target.value);
+                setPage(1);
+              }}
+              style={controlInputStyle}
+            >
               {TYPE_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}
@@ -135,7 +141,14 @@ export function HistoryScreen() {
 
           <label style={controlFieldStyle}>
             <span style={controlLabelStyle}>Responsavel</span>
-            <select value={actorFilter} onChange={(event) => setActorFilter(event.target.value)} style={controlInputStyle}>
+            <select
+              value={actorFilter}
+              onChange={(event) => {
+                setActorFilter(event.target.value);
+                setPage(1);
+              }}
+              style={controlInputStyle}
+            >
               {actorOptions.map((option) => (
                 <option key={option} value={option}>
                   {option === "all" ? "Todos" : option}
@@ -146,7 +159,14 @@ export function HistoryScreen() {
 
           <label style={controlFieldStyle}>
             <span style={controlLabelStyle}>Periodo</span>
-            <select value={periodFilter} onChange={(event) => setPeriodFilter(event.target.value)} style={controlInputStyle}>
+            <select
+              value={periodFilter}
+              onChange={(event) => {
+                setPeriodFilter(event.target.value);
+                setPage(1);
+              }}
+              style={controlInputStyle}
+            >
               {PERIOD_OPTIONS.map((option) => (
                 <option key={option.id} value={option.id}>
                   {option.label}

@@ -194,6 +194,42 @@ function pickOne<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
+type OpportunityStageSummary = {
+  name: string | null;
+  probability?: number | null;
+};
+
+type OpportunityAccountSummary = {
+  trade_name: string | null;
+  legal_name: string | null;
+};
+
+type OpportunityOwnerSummary = {
+  full_name: string | null;
+};
+
+type OpportunityQueryRecord = {
+  id: string;
+  title: string;
+  amount: number | null;
+  base_amount: number | null;
+  is_recurring: boolean | null;
+  months: number | null;
+  owner_id: string | null;
+  status: string | null;
+  next_step: string | null;
+  expected_close_date: string | null;
+  conclusion_status?: string | null;
+  conclusion_reason?: string | null;
+  concluded_at?: string | null;
+  probability_override?: number | null;
+  lead_source?: string | null;
+  created_at?: string | null;
+  pipeline_stages: OpportunityStageSummary | OpportunityStageSummary[] | null;
+  accounts: OpportunityAccountSummary | OpportunityAccountSummary[] | null;
+  profiles: OpportunityOwnerSummary | OpportunityOwnerSummary[] | null;
+};
+
 function getLocalOpportunityPreviews(): OpportunityItem[] {
   if (typeof window === "undefined") {
     return [];
@@ -2318,7 +2354,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
           "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
         .order("created_at", { ascending: false });
-      let data = (primaryQuery.data ?? null) as Array<Record<string, any>> | null;
+      let data = (primaryQuery.data ?? null) as OpportunityQueryRecord[] | null;
       let error = primaryQuery.error;
 
       if (error || !data) {
@@ -2329,7 +2365,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
           )
           .order("created_at", { ascending: false });
 
-        data = (fallbackQuery.data ?? null) as Array<Record<string, any>> | null;
+        data = (fallbackQuery.data ?? null) as OpportunityQueryRecord[] | null;
         error = fallbackQuery.error;
       }
 

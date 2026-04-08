@@ -14,6 +14,23 @@ type OpportunityRow = {
   createdAt: string | null;
 };
 
+type OpportunityStageRelation = { name: string | null } | Array<{ name: string | null }> | null;
+type OpportunityAccountRelation =
+  | { trade_name: string | null; legal_name: string | null }
+  | Array<{ trade_name: string | null; legal_name: string | null }>
+  | null;
+type OpportunityQueryRow = {
+  id: string;
+  title: string;
+  amount: number | null;
+  status: "open" | "won" | "lost" | null;
+  expected_close_date: string | null;
+  next_step: string | null;
+  created_at: string | null;
+  pipeline_stages: OpportunityStageRelation;
+  accounts: OpportunityAccountRelation;
+};
+
 type AttentionLevel = "Critical" | "High" | "Medium" | "Low";
 
 function toCurrency(value: number) {
@@ -158,24 +175,24 @@ export async function GET(request: NextRequest) {
     (tasksRes.data ?? []).filter((task) => Boolean(task.opportunity_id)).map((task) => task.opportunity_id as string)
   );
 
-  const opportunities: OpportunityRow[] = opportunitiesRes.data.map((raw) => {
-    const row = raw as Record<string, any>;
-    const stageSource = row.pipeline_stages as any;
-    const accountSource = row.accounts as any;
+  const opportunities: OpportunityRow[] = opportunitiesRes.data.map((row) => {
+    const typedRow = row as OpportunityQueryRow;
+    const stageSource = typedRow.pipeline_stages;
+    const accountSource = typedRow.accounts;
     const stage = Array.isArray(stageSource) ? stageSource[0]?.name ?? "Sem etapa" : stageSource?.name ?? "Sem etapa";
     const account = Array.isArray(accountSource) ? accountSource[0] : accountSource;
     const company = account?.trade_name ?? account?.legal_name ?? "Conta sem nome";
 
     return {
-      id: row.id,
-      title: row.title,
+      id: typedRow.id,
+      title: typedRow.title,
       stage,
       company,
-      amount: typeof row.amount === "number" ? row.amount : 0,
-      status: (row.status as "open" | "won" | "lost") ?? "open",
-      expectedCloseDate: row.expected_close_date ?? null,
-      nextStep: row.next_step ?? null,
-      createdAt: row.created_at ?? null
+      amount: typeof typedRow.amount === "number" ? typedRow.amount : 0,
+      status: typedRow.status ?? "open",
+      expectedCloseDate: typedRow.expected_close_date ?? null,
+      nextStep: typedRow.next_step ?? null,
+      createdAt: typedRow.created_at ?? null
     };
   });
 

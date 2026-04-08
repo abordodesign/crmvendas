@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { CrmShell } from "@/components/crm-shell";
 import { defaultCrmSettings, getCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
 import {
@@ -37,7 +37,7 @@ export function AgendaScreen() {
   const [itemPendingDelete, setItemPendingDelete] = useState<AgendaItem | null>(null);
   const [draggedAgendaId, setDraggedAgendaId] = useState<string | null>(null);
   const [dragOverDayKey, setDragOverDayKey] = useState<string | null>(null);
-  const [notifiedIds, setNotifiedIds] = useState<string[]>([]);
+  const notifiedIdsRef = useRef<Set<string>>(new Set());
   const [isPending, startTransition] = useTransition();
 
   useEffect(() => {
@@ -103,7 +103,7 @@ export function AgendaScreen() {
       return;
     }
 
-    const pending = upcomingReminders.filter((item) => !notifiedIds.includes(item.id));
+    const pending = upcomingReminders.filter((item) => !notifiedIdsRef.current.has(item.id));
 
     if (!pending.length) {
       return;
@@ -128,8 +128,10 @@ export function AgendaScreen() {
       };
     });
 
-    setNotifiedIds((current) => [...current, ...pending.map((item) => item.id)]);
-  }, [notifiedIds, settings.features.browser_notifications, upcomingReminders]);
+    pending.forEach((item) => {
+      notifiedIdsRef.current.add(item.id);
+    });
+  }, [settings.features.browser_notifications, upcomingReminders]);
 
   function resetForm() {
     setEditingId(null);
