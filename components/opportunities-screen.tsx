@@ -1386,7 +1386,7 @@ function CurrencyField({
       </span>
       <input
         value={value}
-        onChange={(event) => onChange(formatCurrencyInput(event.target.value))}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         required={required}
         disabled={disabled}
