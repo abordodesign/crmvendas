@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { CustomerFormModal } from "@/components/customer-form-modal";
 import { CrmShell, pillStyle } from "@/components/crm-shell";
 import { hasPermission } from "@/lib/access-control";
+import { formatCurrencyInput, parseCurrencyInput } from "@/lib/currency-input";
 import { defaultCrmSettings, getCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
 import {
   CONCLUSION_REASON_OPTIONS,
@@ -159,7 +160,7 @@ export function OpportunitiesScreen() {
     [opportunities]
   );
   const calculatedTicket = useMemo(() => {
-    const baseAmount = Number(amount || 0);
+    const baseAmount = parseCurrencyInput(amount);
     const multiplier = isRecurring ? Math.max(1, Number(months || 1)) : 1;
     return baseAmount * multiplier;
   }, [amount, isRecurring, months]);
@@ -361,7 +362,7 @@ export function OpportunitiesScreen() {
     setService(opportunity.title);
     setLeadSource(leadSourceIdFromLabel(opportunity.leadSource));
     setNextStep(opportunity.nextStep ?? "");
-    setAmount(String(amountToNumber(opportunity.baseAmount)));
+    setAmount(formatCurrencyInput(opportunity.baseAmount));
     setIsRecurring(opportunity.isRecurring);
     setMonths(String(opportunity.months));
     setManualProbability(
@@ -434,7 +435,7 @@ export function OpportunitiesScreen() {
             leadSource: leadSourceLabelFromId(leadSource),
             nextStep,
             amount: calculatedTicket,
-            baseAmount: Number(amount || 0),
+            baseAmount: parseCurrencyInput(amount),
             isRecurring,
             months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
             probability: hasManualProbability ? effectiveProbability : undefined,
@@ -493,7 +494,7 @@ export function OpportunitiesScreen() {
             leadSource: leadSourceLabelFromId(leadSource),
             nextStep,
             amount: calculatedTicket,
-            baseAmount: Number(amount || 0),
+            baseAmount: parseCurrencyInput(amount),
           isRecurring,
           months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
           probability: hasManualProbability ? effectiveProbability : undefined,
@@ -598,7 +599,7 @@ export function OpportunitiesScreen() {
           leadSource: leadSourceLabelFromId(leadSource),
           nextStep,
           amount: calculatedTicket,
-          baseAmount: Number(amount || 0),
+          baseAmount: parseCurrencyInput(amount),
           isRecurring,
           months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
           probability: hasManualProbability ? effectiveProbability : undefined,
@@ -1355,6 +1356,47 @@ function Field({
   );
 }
 
+function CurrencyField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required = false,
+  disabled = false
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+  disabled?: boolean;
+}) {
+  return (
+    <label style={{ display: "grid", gap: 8, minWidth: 0, width: "100%" }}>
+      <span
+        style={{
+          color: "var(--muted)",
+          fontSize: 10,
+          fontWeight: 800,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase"
+        }}
+      >
+        {label}
+      </span>
+      <input
+        value={value}
+        onChange={(event) => onChange(formatCurrencyInput(event.target.value))}
+        placeholder={placeholder}
+        required={required}
+        disabled={disabled}
+        inputMode="decimal"
+        style={inputStyle}
+      />
+    </label>
+  );
+}
+
 function ToggleField({
   label,
   checked,
@@ -1708,11 +1750,11 @@ function OpportunityFormModal({
                 minWidth: 0
               }}
             >
-              <Field
+              <CurrencyField
                 label="Valor base"
                 value={amount}
                 onChange={onAmountChange}
-                placeholder="38000"
+                placeholder="1.788,30"
                 required
                 disabled={viewMode}
               />
@@ -2150,8 +2192,7 @@ function DateField({
 }
 
 function amountToNumber(value: string) {
-  const numeric = Number(value.replace(/[^\d,-]/g, "").replace(".", "").replace(",", "."));
-  return Number.isFinite(numeric) ? numeric : 0;
+  return parseCurrencyInput(value);
 }
 
 function toInputDate(value: string) {

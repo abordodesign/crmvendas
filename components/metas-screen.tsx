@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { CrmShell } from "@/components/crm-shell";
 import { getDashboardData, subscribeCrmDataChanged } from "@/lib/crm-data-source";
+import { formatCurrencyInput, parseCurrencyInput } from "@/lib/currency-input";
 import { seedDashboardData } from "@/lib/crm-seed";
 import { getCrmSettings, saveCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
 import type { DashboardData } from "@/types/crm-app";
@@ -141,7 +142,7 @@ export function MetasScreen() {
                 value={
                   <input
                     value={goalInput}
-                    onChange={(event) => setGoalInput(event.target.value)}
+                    onChange={(event) => setGoalInput(formatCurrencyInput(event.target.value))}
                     placeholder="0,00"
                     inputMode="decimal"
                     style={metricInputStyle}
@@ -315,18 +316,6 @@ function SummaryCard({
       <div style={summaryDetailStyle}>{detail}</div>
     </div>
   );
-}
-
-function parseCurrencyInput(value: string) {
-  if (!value.trim()) {
-    return 0;
-  }
-
-  const sanitized = value.replace(/[^\d,.-]/g, "");
-  const hasComma = sanitized.includes(",");
-  const normalized = hasComma ? sanitized.replace(/\./g, "").replace(",", ".") : sanitized.replace(",", ".");
-  const numeric = Number(normalized);
-  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 function currencyToNumber(value: string) {
