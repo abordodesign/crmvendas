@@ -68,6 +68,33 @@ export type ActivityItem = {
   eventType?: "movement" | "task" | "interaction" | "customer" | "opportunity";
 };
 
+export type WeeklyActivityKey =
+  | "companies_added"
+  | "opportunities_created"
+  | "first_contacts"
+  | "conversations_started"
+  | "diagnostics_scheduled"
+  | "meetings_held"
+  | "proposals_sent"
+  | "followups_done";
+
+export type WeeklyActivityLog = {
+  id: string;
+  type: WeeklyActivityKey;
+  subject: string;
+  notes: string;
+  occurredAt: string;
+  actor: string;
+};
+
+export type WeeklyActivityData = {
+  weekStart: string;
+  weekEnd: string;
+  counts: Record<WeeklyActivityKey, number>;
+  previousCounts: Record<WeeklyActivityKey, number>;
+  recent: WeeklyActivityLog[];
+};
+
 export type CustomerItem = {
   id: string;
   legalName: string;

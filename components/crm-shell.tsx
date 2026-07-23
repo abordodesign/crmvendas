@@ -22,6 +22,7 @@ type CrmShellProps = {
     | "/dashboard"
     | "/dashboard/metas"
     | "/dashboard/statistics"
+    | "/dashboard/weekly-activities"
     | "/dashboard/prospecting"
     | "/dashboard/prospecting-free"
     | "/dashboard/agenda"
@@ -42,6 +43,7 @@ type NavItem = {
     | "/dashboard"
     | "/dashboard/metas"
     | "/dashboard/statistics"
+    | "/dashboard/weekly-activities"
     | "/dashboard/prospecting"
     | "/dashboard/prospecting-free"
     | "/dashboard/agenda"
@@ -60,6 +62,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/dashboard/metas", label: "Metas" },
   { href: "/dashboard/statistics", label: "Estatisticas" },
+  { href: "/dashboard/weekly-activities", label: "Atividades da Semana" },
   { href: "/dashboard/prospecting-free", label: "Prospeccao Gratis" },
   { href: "/dashboard/agenda", label: "Agenda" },
   { href: "/dashboard/customers", label: "Clientes" },

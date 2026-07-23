@@ -24,7 +24,10 @@ import type {
   OpportunityNote,
   PipelineStatistics,
   PipelineColumn,
-  TaskItem
+  TaskItem,
+  WeeklyActivityData,
+  WeeklyActivityKey,
+  WeeklyActivityLog
 } from "@/types/crm-app";
 
 type ReferenceOption = {
@@ -83,6 +86,7 @@ const CRM_DATA_CHANGED_EVENT = "crm:data-changed";
 const STAGE_NOTE_PREFIX = "stage_move:";
 const AUDIT_NOTE_PREFIX = "audit:";
 const OPPORTUNITY_NOTE_PREFIX = "opportunity_note:";
+const WEEKLY_METRIC_PREFIX = "weekly_metric:";
 const AGENT_TASK_PREFIX = "[AGENTE PIPELINE]";
 const USER_CONTEXT_CACHE_TTL_MS = 5000;
 const QUERY_CACHE_TTL_MS = 4000;
@@ -558,7 +562,7 @@ function saveLocalActivity(item: ActivityItem) {
   }
 
   const current = getLocalActivity();
-  const next = [item, ...current].slice(0, 8);
+  const next = [item, ...current].slice(0, 200);
   window.localStorage.setItem(LOCAL_ACTIVITY_KEY, JSON.stringify(next));
   notifyCrmDataChanged();
 }
@@ -3673,6 +3677,222 @@ export async function getHistoryActivities(): Promise<ActivityItem[]> {
   } catch {
     return [...localActivity, ...seedActivity].sort(sortActivityByDateDesc);
   }
+}
+
+const WEEKLY_ACTIVITY_KEYS: WeeklyActivityKey[] = [
+  "companies_added",
+  "opportunities_created",
+  "first_contacts",
+  "conversations_started",
+  "diagnostics_scheduled",
+  "meetings_held",
+  "proposals_sent",
+  "followups_done"
+];
+
+function emptyWeeklyActivityCounts(): Record<WeeklyActivityKey, number> {
+  return Object.fromEntries(WEEKLY_ACTIVITY_KEYS.map((key) => [key, 0])) as Record<WeeklyActivityKey, number>;
+}
+
+function weeklyRange(referenceDate: string) {
+  const reference = new Date(`${referenceDate}T12:00:00`);
+  const day = reference.getDay();
+  const daysSinceMonday = day === 0 ? 6 : day - 1;
+  const start = new Date(reference);
+  start.setDate(reference.getDate() - daysSinceMonday);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+
+  const previousStart = new Date(start);
+  previousStart.setDate(start.getDate() - 7);
+
+  return { start, end, previousStart };
+}
+
+function toLocalDateKey(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function metricPeriod(value: string | null | undefined, range: ReturnType<typeof weeklyRange>) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return null;
+  if (time >= range.start.getTime() && time < range.end.getTime()) return "current" as const;
+  if (time >= range.previousStart.getTime() && time < range.start.getTime()) return "previous" as const;
+  return null;
+}
+
+function parseWeeklyMetric(notes: string | null | undefined): { type: WeeklyActivityKey; notes: string } | null {
+  if (!notes?.startsWith(WEEKLY_METRIC_PREFIX)) return null;
+  const [rawType = "", ...noteParts] = notes.slice(WEEKLY_METRIC_PREFIX.length).split("||");
+  if (!WEEKLY_ACTIVITY_KEYS.includes(rawType as WeeklyActivityKey)) return null;
+  return { type: rawType as WeeklyActivityKey, notes: noteParts.join("||") };
+}
+
+function localWeeklyMetric(item: ActivityItem): WeeklyActivityKey | null {
+  const match = item.action.match(/^registrou indicador ([a-z_]+)$/);
+  const key = match?.[1] as WeeklyActivityKey | undefined;
+  return key && WEEKLY_ACTIVITY_KEYS.includes(key) ? key : null;
+}
+
+export async function getWeeklyActivityData(referenceDate: string): Promise<WeeklyActivityData> {
+  const range = weeklyRange(referenceDate);
+  const counts = emptyWeeklyActivityCounts();
+  const previousCounts = emptyWeeklyActivityCounts();
+  const recent: WeeklyActivityLog[] = [];
+
+  const add = (type: WeeklyActivityKey, period: "current" | "previous" | null) => {
+    if (period === "current") counts[type] += 1;
+    if (period === "previous") previousCounts[type] += 1;
+  };
+
+  const localCustomers = getLocalCustomers();
+  const localOpportunities = getLocalOpportunityPreviews();
+  const localActivities = getLocalActivity();
+
+  localCustomers.forEach((item) => {
+    const timestamp = item.id.startsWith("local-customer-") ? Number(item.id.split("-").at(-1)) : Number.NaN;
+    add("companies_added", Number.isFinite(timestamp) ? metricPeriod(new Date(timestamp).toISOString(), range) : null);
+  });
+  localOpportunities
+    .filter((item) => item.id.startsWith("local-opportunity-"))
+    .forEach((item) => add("opportunities_created", metricPeriod(item.createdAt, range)));
+  localActivities.forEach((item) => {
+    const type = localWeeklyMetric(item);
+    const period = metricPeriod(item.createdAt, range);
+    if (type) {
+      add(type, period);
+      if (period === "current") {
+        recent.push({
+          id: item.id,
+          type,
+          subject: item.target,
+          notes: "",
+          occurredAt: item.createdAt ?? new Date().toISOString(),
+          actor: item.actor
+        });
+      }
+    }
+
+    if (item.eventType === "movement" && normalizeStageLabel(item.target) === "Proposta enviada") {
+      add("proposals_sent", period);
+    }
+  });
+
+  try {
+    const [accountsResult, opportunitiesResult, activitiesResult] = await Promise.all([
+      supabase
+        .from("accounts")
+        .select("id, created_at")
+        .gte("created_at", range.previousStart.toISOString())
+        .lt("created_at", range.end.toISOString()),
+      supabase
+        .from("opportunities")
+        .select("id, created_at")
+        .gte("created_at", range.previousStart.toISOString())
+        .lt("created_at", range.end.toISOString()),
+      supabase
+        .from("activities")
+        .select("id, subject, notes, created_at, completed_at, actor_id, profiles:actor_id(full_name)")
+        .order("created_at", { ascending: false })
+        .limit(500)
+    ]);
+
+    accountsResult.data?.forEach((item) => add("companies_added", metricPeriod(item.created_at, range)));
+    opportunitiesResult.data?.forEach((item) => add("opportunities_created", metricPeriod(item.created_at, range)));
+    activitiesResult.data?.forEach((item) => {
+      const metric = parseWeeklyMetric(item.notes);
+      const movement = parseStageMovement(item.notes);
+
+      if (metric) {
+        const occurredAt = item.completed_at ?? item.created_at;
+        const period = metricPeriod(occurredAt, range);
+        add(metric.type, period);
+
+        if (period === "current") {
+          const profile = pickOne(item.profiles);
+          recent.push({
+            id: item.id,
+            type: metric.type,
+            subject: item.subject,
+            notes: metric.notes,
+            occurredAt,
+            actor: profile?.full_name ?? "Equipe"
+          });
+        }
+      } else if (movement && normalizeStageLabel(movement.toStage) === "Proposta enviada") {
+        const period = metricPeriod(item.created_at, range);
+        add("proposals_sent", period);
+        if (period === "current") {
+          const profile = pickOne(item.profiles);
+          recent.push({
+            id: item.id,
+            type: "proposals_sent",
+            subject: item.subject,
+            notes: "Movimentacao automatica do funil",
+            occurredAt: item.created_at,
+            actor: profile?.full_name ?? "Equipe"
+          });
+        }
+      }
+    });
+  } catch {
+    // Os dados locais calculados acima mantem a tela funcional sem conexao.
+  }
+
+  return {
+    weekStart: toLocalDateKey(range.start),
+    weekEnd: toLocalDateKey(new Date(range.end.getTime() - 1)),
+    counts,
+    previousCounts,
+    recent: Array.from(new Map(recent.map((item) => [item.id, item])).values()).sort(
+      (a, b) => new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+    )
+  };
+}
+
+export async function recordWeeklyActivity(input: {
+  type: Exclude<WeeklyActivityKey, "companies_added" | "opportunities_created">;
+  subject: string;
+  notes: string;
+  occurredOn: string;
+}): Promise<{ ok: boolean; message: string }> {
+  const occurredAt = new Date(`${input.occurredOn}T12:00:00`).toISOString();
+  const context = await getCurrentUserContext();
+
+  if (!context) {
+    saveLocalActivity({
+      id: `activity-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      actor: "Equipe",
+      action: `registrou indicador ${input.type}`,
+      target: input.subject.trim(),
+      when: formatRelative(occurredAt),
+      createdAt: occurredAt,
+      eventType: "interaction"
+    });
+    return { ok: true, message: "Atividade registrada localmente." };
+  }
+
+  const { error } = await supabase.from("activities").insert({
+    organization_id: context.organizationId,
+    actor_id: context.userId,
+    kind: "note",
+    subject: input.subject.trim(),
+    notes: `${WEEKLY_METRIC_PREFIX}${input.type}||${input.notes.trim()}`,
+    completed_at: occurredAt
+  });
+
+  if (error) {
+    return { ok: false, message: "Nao foi possivel registrar a atividade." };
+  }
+
+  notifyCrmDataChanged();
+  return { ok: true, message: "Atividade contabilizada na semana." };
 }
 
 export async function createAgendaEntry(input: {
