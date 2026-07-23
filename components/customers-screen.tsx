@@ -5,6 +5,7 @@ import { CustomerFormModal } from "@/components/customer-form-modal";
 import { CrmShell, pillStyle } from "@/components/crm-shell";
 import { createCustomer, deleteCustomer, getCustomers, getOpportunities, getTasks, updateCustomer } from "@/lib/crm-data-source";
 import { hasPermission } from "@/lib/access-control";
+import { formatCurrencyInput } from "@/lib/currency-input";
 import { seedCustomers } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
 import type { CustomerItem, OpportunityItem, TaskItem } from "@/types/crm-app";
@@ -29,6 +30,14 @@ export function CustomersScreen() {
   const [stateName, setStateName] = useState("");
   const [zipCode, setZipCode] = useState("");
   const [document, setDocument] = useState("");
+  const [radarSiteScore, setRadarSiteScore] = useState("");
+  const [radarInstagramScore, setRadarInstagramScore] = useState("");
+  const [radarGoogleScore, setRadarGoogleScore] = useState("");
+  const [radarBrandScore, setRadarBrandScore] = useState("");
+  const [radarUrgency, setRadarUrgency] = useState<CustomerItem["radarUrgency"]>("Media");
+  const [radarPotential, setRadarPotential] = useState("");
+  const [radarLastContact, setRadarLastContact] = useState("");
+  const [radarNextAction, setRadarNextAction] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [customerPendingDelete, setCustomerPendingDelete] = useState<CustomerItem | null>(null);
@@ -47,6 +56,7 @@ export function CustomersScreen() {
   const [cityFilter, setCityFilter] = useState("all");
   const [opportunityFilter, setOpportunityFilter] = useState("all");
   const [taskRecencyFilter, setTaskRecencyFilter] = useState("all");
+  const [urgencyFilter, setUrgencyFilter] = useState("all");
   const [isPending, startTransition] = useTransition();
   const canManageCustomers = role ? hasPermission(role, "accounts:write") : false;
 
@@ -100,7 +110,15 @@ export function CustomersScreen() {
           city,
           state: stateName,
           zipCode,
-          document
+          document,
+          radarSiteScore,
+          radarInstagramScore,
+          radarGoogleScore,
+          radarBrandScore,
+          radarUrgency,
+          radarPotential,
+          radarLastContact,
+          radarNextAction
         });
 
         setCustomers((current) => upsertCustomer(current, created));
@@ -128,6 +146,14 @@ export function CustomersScreen() {
     setStateName(customer.state);
     setZipCode(customer.zipCode);
     setDocument(customer.document);
+    setRadarSiteScore(scoreToInput(customer.radarSiteScore));
+    setRadarInstagramScore(scoreToInput(customer.radarInstagramScore));
+    setRadarGoogleScore(scoreToInput(customer.radarGoogleScore));
+    setRadarBrandScore(scoreToInput(customer.radarBrandScore));
+    setRadarUrgency(customer.radarUrgency);
+    setRadarPotential(formatCurrencyInput(customer.radarPotential));
+    setRadarLastContact(customer.radarLastContact);
+    setRadarNextAction(customer.radarNextAction);
     setIsModalOpen(true);
     setFeedback(null);
   }
@@ -145,6 +171,14 @@ export function CustomersScreen() {
     setStateName("");
     setZipCode("");
     setDocument("");
+    setRadarSiteScore("");
+    setRadarInstagramScore("");
+    setRadarGoogleScore("");
+    setRadarBrandScore("");
+    setRadarUrgency("Media");
+    setRadarPotential("");
+    setRadarLastContact("");
+    setRadarNextAction("");
     if (closeModal) {
       setIsModalOpen(false);
     }
@@ -182,7 +216,15 @@ export function CustomersScreen() {
             city,
             state: stateName,
             zipCode,
-            document
+            document,
+            radarSiteScore,
+            radarInstagramScore,
+            radarGoogleScore,
+            radarBrandScore,
+            radarUrgency,
+            radarPotential,
+            radarLastContact,
+            radarNextAction
           });
 
           setCustomers((current) => {
@@ -321,6 +363,10 @@ export function CustomersScreen() {
         return false;
       }
 
+      if (urgencyFilter !== "all" && customer.radarUrgency !== urgencyFilter) {
+        return false;
+      }
+
       if (opportunityFilter === "with_active" && !hasActiveOpportunity(customer)) {
         return false;
       }
@@ -356,13 +402,15 @@ export function CustomersScreen() {
           customer.state,
           customer.document,
           customer.email,
-          customer.phone
+          customer.phone,
+          customer.radarUrgency,
+          customer.radarNextAction
         ].join(" ")
       );
 
       return haystack.includes(normalizedSearch);
     });
-  }, [customers, opportunities, tasks, searchTerm, segmentFilter, ownerFilter, statusFilter, cityFilter, opportunityFilter, taskRecencyFilter]);
+  }, [customers, opportunities, tasks, searchTerm, segmentFilter, ownerFilter, statusFilter, cityFilter, opportunityFilter, taskRecencyFilter, urgencyFilter]);
 
   return (
     <CrmShell
@@ -386,7 +434,15 @@ export function CustomersScreen() {
           city,
           state: stateName,
           zipCode,
-          document
+          document,
+          radarSiteScore,
+          radarInstagramScore,
+          radarGoogleScore,
+          radarBrandScore,
+          radarUrgency,
+          radarPotential,
+          radarLastContact,
+          radarNextAction
         }}
         onChange={(field, value) => {
           const handlers: Record<string, (next: string) => void> = {
@@ -400,7 +456,15 @@ export function CustomersScreen() {
             city: setCity,
             state: setStateName,
             zipCode: setZipCode,
-            document: setDocument
+            document: setDocument,
+            radarSiteScore: setRadarSiteScore,
+            radarInstagramScore: setRadarInstagramScore,
+            radarGoogleScore: setRadarGoogleScore,
+            radarBrandScore: setRadarBrandScore,
+            radarUrgency: (next) => setRadarUrgency(next as CustomerItem["radarUrgency"]),
+            radarPotential: setRadarPotential,
+            radarLastContact: setRadarLastContact,
+            radarNextAction: setRadarNextAction
           };
 
           handlers[field]?.(value);
@@ -548,6 +612,15 @@ export function CustomersScreen() {
                   <option value="with_30">Com tarefa nos ultimos 30 dias</option>
                 </select>
               </label>
+              <label style={filterFieldStyle}>
+                <span style={filterLabelStyle}>Urgencia Radar</span>
+                <select value={urgencyFilter} onChange={(event) => setUrgencyFilter(event.target.value)} style={filterInputStyle}>
+                  <option value="all">Todas</option>
+                  <option value="Alta">Alta</option>
+                  <option value="Media">Media</option>
+                  <option value="Baixa">Baixa</option>
+                </select>
+              </label>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={pillStyle}>Filtros ativos para carteira</div>
@@ -561,6 +634,7 @@ export function CustomersScreen() {
                   setCityFilter("all");
                   setOpportunityFilter("all");
                   setTaskRecencyFilter("all");
+                  setUrgencyFilter("all");
                 }}
                 style={resetFiltersButtonStyle}
               >
@@ -645,6 +719,8 @@ export function CustomersScreen() {
                 </div>
               </div>
 
+              <RadarCard customer={customer} />
+
               <div
                 style={{
                   marginTop: 14,
@@ -701,6 +777,72 @@ export function CustomersScreen() {
       </section>
     </CrmShell>
   );
+}
+
+function RadarCard({ customer }: { customer: CustomerItem }) {
+  const scores = [
+    { label: "Site", value: customer.radarSiteScore },
+    { label: "Instagram", value: customer.radarInstagramScore },
+    { label: "Google", value: customer.radarGoogleScore },
+    { label: "Marca", value: customer.radarBrandScore }
+  ];
+  const ratedScores = scores.filter((score): score is { label: string; value: number } => score.value !== null);
+  const average = ratedScores.length
+    ? (ratedScores.reduce((total, score) => total + score.value, 0) / ratedScores.length).toFixed(1).replace(".", ",")
+    : null;
+  const urgencyColor =
+    customer.radarUrgency === "Alta" ? "#b91c1c" : customer.radarUrgency === "Baixa" ? "#15803d" : "#a16207";
+
+  return (
+    <div style={radarCardStyle}>
+      <div style={radarHeaderStyle}>
+        <div>
+          <div style={radarEyebrowStyle}>Radar A Bordo</div>
+          <div style={radarAverageStyle}>{average ? `${average}/10` : "Avaliacao pendente"}</div>
+        </div>
+        <div style={{ ...radarUrgencyStyle, color: urgencyColor, borderColor: `${urgencyColor}33`, background: `${urgencyColor}0f` }}>
+          Urgencia {customer.radarUrgency}
+        </div>
+      </div>
+
+      <div style={radarScoresStyle}>
+        {scores.map((score) => (
+          <div key={score.label} style={radarScoreStyle}>
+            <span style={radarScoreLabelStyle}>{score.label}</span>
+            <strong style={{ color: score.value === null ? "var(--muted)" : scoreColor(score.value) }}>
+              {score.value === null ? "—" : `${score.value}/10`}
+            </strong>
+          </div>
+        ))}
+      </div>
+
+      <div style={radarCommercialGridStyle}>
+        <DataCell label="Potencial" value={formatRadarCurrency(customer.radarPotential)} emphasis />
+        <DataCell label="Ultimo contato" value={formatRadarDate(customer.radarLastContact)} />
+        <DataCell label="Proxima acao" value={customer.radarNextAction || "Nao informada"} />
+      </div>
+    </div>
+  );
+}
+
+function scoreToInput(value: number | null) {
+  return value === null ? "" : String(value);
+}
+
+function scoreColor(value: number) {
+  if (value >= 8) return "#15803d";
+  if (value >= 5) return "#a16207";
+  return "#b91c1c";
+}
+
+function formatRadarCurrency(value: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
+}
+
+function formatRadarDate(value: string) {
+  if (!value) return "Nao informado";
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? value : new Intl.DateTimeFormat("pt-BR").format(parsed);
 }
 
 function DeleteCustomerModal({
@@ -855,6 +997,79 @@ const submitButtonStyle: React.CSSProperties = {
   color: "#ffffff",
   fontWeight: 800,
   cursor: "pointer"
+};
+
+const radarCardStyle: React.CSSProperties = {
+  marginTop: 14,
+  padding: "16px",
+  borderRadius: 18,
+  background: "linear-gradient(135deg, rgba(79, 70, 229, 0.075), rgba(20, 184, 166, 0.045))",
+  border: "1px solid rgba(79, 70, 229, 0.16)"
+};
+
+const radarHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap"
+};
+
+const radarEyebrowStyle: React.CSSProperties = {
+  color: "var(--accent)",
+  fontSize: 10,
+  fontWeight: 900,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase"
+};
+
+const radarAverageStyle: React.CSSProperties = {
+  marginTop: 5,
+  fontSize: 20,
+  fontWeight: 900,
+  letterSpacing: "-0.04em"
+};
+
+const radarUrgencyStyle: React.CSSProperties = {
+  border: "1px solid",
+  borderRadius: 999,
+  padding: "7px 10px",
+  fontSize: 11,
+  fontWeight: 900
+};
+
+const radarScoresStyle: React.CSSProperties = {
+  marginTop: 14,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+  gap: 8
+};
+
+const radarScoreStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  minWidth: 0,
+  padding: "10px 12px",
+  borderRadius: 12,
+  background: "#ffffff",
+  border: "1px solid rgba(79, 70, 229, 0.1)"
+};
+
+const radarScoreLabelStyle: React.CSSProperties = {
+  color: "var(--muted)",
+  fontSize: 11,
+  fontWeight: 800
+};
+
+const radarCommercialGridStyle: React.CSSProperties = {
+  marginTop: 14,
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+  paddingTop: 14,
+  borderTop: "1px solid rgba(79, 70, 229, 0.12)"
 };
 
 const feedbackStyle: React.CSSProperties = {

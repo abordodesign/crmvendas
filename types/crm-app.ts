@@ -84,6 +84,14 @@ export type CustomerItem = {
   owner: string;
   contacts: number;
   status: string;
+  radarSiteScore: number | null;
+  radarInstagramScore: number | null;
+  radarGoogleScore: number | null;
+  radarBrandScore: number | null;
+  radarUrgency: "Alta" | "Media" | "Baixa";
+  radarPotential: number;
+  radarLastContact: string;
+  radarNextAction: string;
 };
 
 export type OpportunityItem = {

@@ -26,7 +26,7 @@ import {
 } from "@/lib/crm-data-source";
 import { seedOpportunities } from "@/lib/crm-seed";
 import { useCrmRole } from "@/lib/use-crm-role";
-import type { OpportunityItem, OpportunityNote } from "@/types/crm-app";
+import type { CustomerItem, OpportunityItem, OpportunityNote } from "@/types/crm-app";
 
 const NEW_ACCOUNT_OPTION = "__new__";
 const STAGE_FLOW = ["Lead", "Qualificacao", "Diagnostico", "Proposta enviada", "Negociacao", "Fechamento"];
@@ -71,6 +71,14 @@ export function OpportunitiesScreen() {
   const [newCustomerState, setNewCustomerState] = useState("");
   const [newCustomerZipCode, setNewCustomerZipCode] = useState("");
   const [newCustomerDocument, setNewCustomerDocument] = useState("");
+  const [newCustomerRadarSiteScore, setNewCustomerRadarSiteScore] = useState("");
+  const [newCustomerRadarInstagramScore, setNewCustomerRadarInstagramScore] = useState("");
+  const [newCustomerRadarGoogleScore, setNewCustomerRadarGoogleScore] = useState("");
+  const [newCustomerRadarBrandScore, setNewCustomerRadarBrandScore] = useState("");
+  const [newCustomerRadarUrgency, setNewCustomerRadarUrgency] = useState<CustomerItem["radarUrgency"]>("Media");
+  const [newCustomerRadarPotential, setNewCustomerRadarPotential] = useState("");
+  const [newCustomerRadarLastContact, setNewCustomerRadarLastContact] = useState("");
+  const [newCustomerRadarNextAction, setNewCustomerRadarNextAction] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [opportunityPendingDelete, setOpportunityPendingDelete] = useState<OpportunityItem | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -269,6 +277,14 @@ export function OpportunitiesScreen() {
     setNewCustomerState("");
     setNewCustomerZipCode("");
     setNewCustomerDocument("");
+    setNewCustomerRadarSiteScore("");
+    setNewCustomerRadarInstagramScore("");
+    setNewCustomerRadarGoogleScore("");
+    setNewCustomerRadarBrandScore("");
+    setNewCustomerRadarUrgency("Media");
+    setNewCustomerRadarPotential("");
+    setNewCustomerRadarLastContact("");
+    setNewCustomerRadarNextAction("");
     setAccountSearch("");
     setIsAccountMenuOpen(false);
     setOpportunityNotes([]);
@@ -334,7 +350,15 @@ export function OpportunitiesScreen() {
           city: newCustomerCity,
           state: newCustomerState,
           zipCode: newCustomerZipCode,
-          document: newCustomerDocument
+          document: newCustomerDocument,
+          radarSiteScore: newCustomerRadarSiteScore,
+          radarInstagramScore: newCustomerRadarInstagramScore,
+          radarGoogleScore: newCustomerRadarGoogleScore,
+          radarBrandScore: newCustomerRadarBrandScore,
+          radarUrgency: newCustomerRadarUrgency,
+          radarPotential: newCustomerRadarPotential,
+          radarLastContact: newCustomerRadarLastContact,
+          radarNextAction: newCustomerRadarNextAction
         });
 
         const label = createdCustomer.tradeName || createdCustomer.legalName;
@@ -806,7 +830,15 @@ export function OpportunitiesScreen() {
           city: newCustomerCity,
           state: newCustomerState,
           zipCode: newCustomerZipCode,
-          document: newCustomerDocument
+          document: newCustomerDocument,
+          radarSiteScore: newCustomerRadarSiteScore,
+          radarInstagramScore: newCustomerRadarInstagramScore,
+          radarGoogleScore: newCustomerRadarGoogleScore,
+          radarBrandScore: newCustomerRadarBrandScore,
+          radarUrgency: newCustomerRadarUrgency,
+          radarPotential: newCustomerRadarPotential,
+          radarLastContact: newCustomerRadarLastContact,
+          radarNextAction: newCustomerRadarNextAction
         }}
         onChange={(field, value) => {
           const handlers: Record<string, (next: string) => void> = {
@@ -820,7 +852,15 @@ export function OpportunitiesScreen() {
             city: setNewCustomerCity,
             state: setNewCustomerState,
             zipCode: setNewCustomerZipCode,
-            document: setNewCustomerDocument
+            document: setNewCustomerDocument,
+            radarSiteScore: setNewCustomerRadarSiteScore,
+            radarInstagramScore: setNewCustomerRadarInstagramScore,
+            radarGoogleScore: setNewCustomerRadarGoogleScore,
+            radarBrandScore: setNewCustomerRadarBrandScore,
+            radarUrgency: (next) => setNewCustomerRadarUrgency(next as CustomerItem["radarUrgency"]),
+            radarPotential: setNewCustomerRadarPotential,
+            radarLastContact: setNewCustomerRadarLastContact,
+            radarNextAction: setNewCustomerRadarNextAction
           };
 
           handlers[field]?.(value);

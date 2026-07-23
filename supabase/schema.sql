@@ -34,6 +34,14 @@ create table if not exists public.accounts (
   zip_code text,
   document text,
   status text not null default 'active',
+  radar_site_score smallint check (radar_site_score between 0 and 10),
+  radar_instagram_score smallint check (radar_instagram_score between 0 and 10),
+  radar_google_score smallint check (radar_google_score between 0 and 10),
+  radar_brand_score smallint check (radar_brand_score between 0 and 10),
+  radar_urgency text not null default 'Media' check (radar_urgency in ('Alta', 'Media', 'Baixa')),
+  radar_potential numeric(12,2) not null default 0,
+  radar_last_contact date,
+  radar_next_action text,
   owner_id uuid references public.profiles(id) on delete cascade,
   updated_at timestamptz not null default now(),
   created_at timestamptz not null default now()
@@ -101,6 +109,16 @@ alter table public.accounts
   add column if not exists document text,
   add column if not exists status text not null default 'active',
   add column if not exists updated_at timestamptz not null default now();
+
+alter table public.accounts
+  add column if not exists radar_site_score smallint,
+  add column if not exists radar_instagram_score smallint,
+  add column if not exists radar_google_score smallint,
+  add column if not exists radar_brand_score smallint,
+  add column if not exists radar_urgency text not null default 'Media',
+  add column if not exists radar_potential numeric(12,2) not null default 0,
+  add column if not exists radar_last_contact date,
+  add column if not exists radar_next_action text;
 
 alter table public.opportunities
   add column if not exists next_step text,

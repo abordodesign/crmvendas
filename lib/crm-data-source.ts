@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase";
 import { getCrmSettings, peekCrmSettings } from "@/lib/crm-settings";
+import { parseCurrencyInput } from "@/lib/currency-input";
 import {
   seedActivity,
   seedAgenda,
@@ -284,7 +285,7 @@ function getLocalCustomers(): CustomerItem[] {
 
   try {
     const parsed = JSON.parse(raw) as CustomerItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.map(withRadarDefaults) : [];
   } catch {
     return [];
   }
@@ -696,6 +697,47 @@ function mergeCustomers(remote: CustomerItem[], local: CustomerItem[]) {
   local.forEach((item) => byId.set(item.id, item));
 
   return Array.from(byId.values());
+}
+
+function normalizeRadarUrgency(value: unknown): CustomerItem["radarUrgency"] {
+  return value === "Alta" || value === "Baixa" ? value : "Media";
+}
+
+function nullableRadarScore(value: unknown) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 && numeric <= 10 ? numeric : null;
+}
+
+function parseRadarPotential(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return 0;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+
+  return parseCurrencyInput(trimmed);
+}
+
+function withRadarDefaults(item: CustomerItem): CustomerItem {
+  return {
+    ...item,
+    radarSiteScore: nullableRadarScore(item.radarSiteScore),
+    radarInstagramScore: nullableRadarScore(item.radarInstagramScore),
+    radarGoogleScore: nullableRadarScore(item.radarGoogleScore),
+    radarBrandScore: nullableRadarScore(item.radarBrandScore),
+    radarUrgency: normalizeRadarUrgency(item.radarUrgency),
+    radarPotential: Number.isFinite(Number(item.radarPotential)) ? Number(item.radarPotential) : 0,
+    radarLastContact: item.radarLastContact ?? "",
+    radarNextAction: item.radarNextAction ?? ""
+  };
 }
 
 function mergeOpportunities(primary: OpportunityItem[], secondary: OpportunityItem[]) {
@@ -2308,7 +2350,7 @@ export async function getCustomers(): Promise<CustomerItem[]> {
       const { data, error } = await supabase
         .from("accounts")
         .select(
-          "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, owner_id, contacts(id), profiles:owner_id(full_name)"
+          "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, owner_id, radar_site_score, radar_instagram_score, radar_google_score, radar_brand_score, radar_urgency, radar_potential, radar_last_contact, radar_next_action, contacts(id), profiles:owner_id(full_name)"
         )
         .order("created_at", { ascending: false });
 
@@ -2335,7 +2377,15 @@ export async function getCustomers(): Promise<CustomerItem[]> {
           document: account.document ?? "",
           owner: resolveCurrentUserLabel(currentContext, account.owner_id, owner?.full_name ?? "Sem responsavel"),
           contacts,
-          status: mapAccountStatusToUi(account.status)
+          status: mapAccountStatusToUi(account.status),
+          radarSiteScore: nullableRadarScore(account.radar_site_score),
+          radarInstagramScore: nullableRadarScore(account.radar_instagram_score),
+          radarGoogleScore: nullableRadarScore(account.radar_google_score),
+          radarBrandScore: nullableRadarScore(account.radar_brand_score),
+          radarUrgency: normalizeRadarUrgency(account.radar_urgency),
+          radarPotential: Number(account.radar_potential ?? 0),
+          radarLastContact: account.radar_last_contact ?? "",
+          radarNextAction: account.radar_next_action ?? ""
         };
       });
 
@@ -2706,6 +2756,14 @@ export async function createCustomer(input: {
   state: string;
   zipCode: string;
   document: string;
+  radarSiteScore: string;
+  radarInstagramScore: string;
+  radarGoogleScore: string;
+  radarBrandScore: string;
+  radarUrgency: CustomerItem["radarUrgency"];
+  radarPotential: string;
+  radarLastContact: string;
+  radarNextAction: string;
 }): Promise<CustomerItem> {
   const context = await getCurrentUserContext();
 
@@ -2724,7 +2782,15 @@ export async function createCustomer(input: {
     document: input.document,
     owner: context?.fullName ?? "Equipe",
     contacts: 0,
-    status: "Ativo"
+    status: "Ativo",
+    radarSiteScore: nullableRadarScore(input.radarSiteScore),
+    radarInstagramScore: nullableRadarScore(input.radarInstagramScore),
+    radarGoogleScore: nullableRadarScore(input.radarGoogleScore),
+    radarBrandScore: nullableRadarScore(input.radarBrandScore),
+    radarUrgency: normalizeRadarUrgency(input.radarUrgency),
+    radarPotential: parseRadarPotential(input.radarPotential),
+    radarLastContact: input.radarLastContact,
+    radarNextAction: input.radarNextAction
   };
 
   if (!context) {
@@ -2756,10 +2822,18 @@ export async function createCustomer(input: {
       state: input.state || null,
       zip_code: input.zipCode || null,
       document: input.document || null,
+      radar_site_score: nullableRadarScore(input.radarSiteScore),
+      radar_instagram_score: nullableRadarScore(input.radarInstagramScore),
+      radar_google_score: nullableRadarScore(input.radarGoogleScore),
+      radar_brand_score: nullableRadarScore(input.radarBrandScore),
+      radar_urgency: normalizeRadarUrgency(input.radarUrgency),
+      radar_potential: parseRadarPotential(input.radarPotential),
+      radar_last_contact: input.radarLastContact || null,
+      radar_next_action: input.radarNextAction || null,
       owner_id: context.userId
     })
     .select(
-      "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status"
+      "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, radar_site_score, radar_instagram_score, radar_google_score, radar_brand_score, radar_urgency, radar_potential, radar_last_contact, radar_next_action"
     )
     .single();
 
@@ -2783,7 +2857,15 @@ export async function createCustomer(input: {
     document: data.document ?? "",
     owner: context.fullName,
     contacts: 0,
-    status: mapAccountStatusToUi(data.status)
+    status: mapAccountStatusToUi(data.status),
+    radarSiteScore: nullableRadarScore(data.radar_site_score),
+    radarInstagramScore: nullableRadarScore(data.radar_instagram_score),
+    radarGoogleScore: nullableRadarScore(data.radar_google_score),
+    radarBrandScore: nullableRadarScore(data.radar_brand_score),
+    radarUrgency: normalizeRadarUrgency(data.radar_urgency),
+    radarPotential: Number(data.radar_potential ?? 0),
+    radarLastContact: data.radar_last_contact ?? "",
+    radarNextAction: data.radar_next_action ?? ""
   };
 
   saveLocalCustomer(customerItem);
@@ -2812,6 +2894,14 @@ export async function updateCustomer(input: {
   state: string;
   zipCode: string;
   document: string;
+  radarSiteScore: string;
+  radarInstagramScore: string;
+  radarGoogleScore: string;
+  radarBrandScore: string;
+  radarUrgency: CustomerItem["radarUrgency"];
+  radarPotential: string;
+  radarLastContact: string;
+  radarNextAction: string;
 }): Promise<CustomerItem> {
   const context = await getCurrentUserContext();
 
@@ -2830,7 +2920,15 @@ export async function updateCustomer(input: {
     document: input.document,
     owner: context?.fullName ?? "Equipe",
     contacts: 0,
-    status: "Ativo"
+    status: "Ativo",
+    radarSiteScore: nullableRadarScore(input.radarSiteScore),
+    radarInstagramScore: nullableRadarScore(input.radarInstagramScore),
+    radarGoogleScore: nullableRadarScore(input.radarGoogleScore),
+    radarBrandScore: nullableRadarScore(input.radarBrandScore),
+    radarUrgency: normalizeRadarUrgency(input.radarUrgency),
+    radarPotential: parseRadarPotential(input.radarPotential),
+    radarLastContact: input.radarLastContact,
+    radarNextAction: input.radarNextAction
   };
 
   if (!context || input.id.startsWith("local-customer-")) {
@@ -2860,11 +2958,19 @@ export async function updateCustomer(input: {
       city: input.city || null,
       state: input.state || null,
       zip_code: input.zipCode || null,
-      document: input.document || null
+      document: input.document || null,
+      radar_site_score: nullableRadarScore(input.radarSiteScore),
+      radar_instagram_score: nullableRadarScore(input.radarInstagramScore),
+      radar_google_score: nullableRadarScore(input.radarGoogleScore),
+      radar_brand_score: nullableRadarScore(input.radarBrandScore),
+      radar_urgency: normalizeRadarUrgency(input.radarUrgency),
+      radar_potential: parseRadarPotential(input.radarPotential),
+      radar_last_contact: input.radarLastContact || null,
+      radar_next_action: input.radarNextAction || null
     })
     .eq("id", input.id)
     .select(
-      "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status"
+      "id, legal_name, trade_name, segment, primary_contact_name, phone, email, address, city, state, zip_code, document, status, radar_site_score, radar_instagram_score, radar_google_score, radar_brand_score, radar_urgency, radar_potential, radar_last_contact, radar_next_action"
     )
     .single();
 
@@ -2888,7 +2994,15 @@ export async function updateCustomer(input: {
     document: data.document ?? "",
     owner: context.fullName,
     contacts: 0,
-    status: mapAccountStatusToUi(data.status)
+    status: mapAccountStatusToUi(data.status),
+    radarSiteScore: nullableRadarScore(data.radar_site_score),
+    radarInstagramScore: nullableRadarScore(data.radar_instagram_score),
+    radarGoogleScore: nullableRadarScore(data.radar_google_score),
+    radarBrandScore: nullableRadarScore(data.radar_brand_score),
+    radarUrgency: normalizeRadarUrgency(data.radar_urgency),
+    radarPotential: Number(data.radar_potential ?? 0),
+    radarLastContact: data.radar_last_contact ?? "",
+    radarNextAction: data.radar_next_action ?? ""
   };
 
   saveLocalCustomer(customerItem);

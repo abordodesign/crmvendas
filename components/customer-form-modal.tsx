@@ -13,6 +13,14 @@ type CustomerFormValues = {
   state: string;
   zipCode: string;
   document: string;
+  radarSiteScore: string;
+  radarInstagramScore: string;
+  radarGoogleScore: string;
+  radarBrandScore: string;
+  radarUrgency: "Alta" | "Media" | "Baixa";
+  radarPotential: string;
+  radarLastContact: string;
+  radarNextAction: string;
 };
 
 export function CustomerFormModal({
@@ -174,6 +182,48 @@ export function CustomerFormModal({
               </label>
             </div>
             {lookupFeedback ? <div style={lookupFeedbackStyle}>{lookupFeedback}</div> : null}
+
+            <div style={{ ...sectionTitleStyle, marginTop: 18 }}>Radar A Bordo</div>
+            <div style={fieldGridCompactStyle}>
+              <ScoreField label="Site" value={values.radarSiteScore} onChange={(value) => onChange("radarSiteScore", value)} />
+              <ScoreField
+                label="Instagram"
+                value={values.radarInstagramScore}
+                onChange={(value) => onChange("radarInstagramScore", value)}
+              />
+              <ScoreField label="Google" value={values.radarGoogleScore} onChange={(value) => onChange("radarGoogleScore", value)} />
+              <ScoreField label="Marca" value={values.radarBrandScore} onChange={(value) => onChange("radarBrandScore", value)} />
+              <label style={{ display: "grid", gap: 8, minWidth: 0, width: "100%" }}>
+                <span style={fieldLabelStyle}>Urgencia</span>
+                <select
+                  value={values.radarUrgency}
+                  onChange={(event) => onChange("radarUrgency", event.target.value as CustomerFormValues["radarUrgency"])}
+                  style={inputStyle}
+                >
+                  <option value="Alta">Alta</option>
+                  <option value="Media">Media</option>
+                  <option value="Baixa">Baixa</option>
+                </select>
+              </label>
+              <Field
+                label="Potencial estimado (R$)"
+                value={values.radarPotential}
+                onChange={(value) => onChange("radarPotential", value)}
+                placeholder="5.000,00"
+              />
+              <Field
+                label="Ultimo contato"
+                value={values.radarLastContact}
+                onChange={(value) => onChange("radarLastContact", value)}
+                type="date"
+              />
+              <Field
+                label="Proxima acao"
+                value={values.radarNextAction}
+                onChange={(value) => onChange("radarNextAction", value)}
+                placeholder="Enviar diagnostico"
+              />
+            </div>
           </div>
 
           <div style={sidePanelStyle}>
@@ -184,6 +234,8 @@ export function CustomerFormModal({
                 <ModalStat label="Responsavel da empresa" value={values.companyContactName || "Nao informado"} />
                 <ModalStat label="Documento" value={values.document || "Nao informado"} />
                 <ModalStat label="Cidade/Estado" value={[values.city, values.state].filter(Boolean).join(" / ") || "Nao informado"} />
+                <ModalStat label="Urgencia Radar" value={values.radarUrgency} />
+                <ModalStat label="Proxima acao" value={values.radarNextAction || "Nao informada"} />
               </div>
             </div>
 
@@ -222,13 +274,15 @@ function Field({
   value,
   onChange,
   required = false,
-  placeholder
+  placeholder,
+  type = "text"
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   required?: boolean;
   placeholder?: string;
+  type?: React.HTMLInputTypeAttribute;
 }) {
   return (
     <label style={{ display: "grid", gap: 8, minWidth: 0, width: "100%" }}>
@@ -244,10 +298,29 @@ function Field({
         {label}
       </span>
       <input
+        type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         required={required}
         placeholder={placeholder}
+        style={inputStyle}
+      />
+    </label>
+  );
+}
+
+function ScoreField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label style={{ display: "grid", gap: 8, minWidth: 0, width: "100%" }}>
+      <span style={fieldLabelStyle}>{label} (0 a 10)</span>
+      <input
+        type="number"
+        min={0}
+        max={10}
+        step={1}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Nao avaliado"
         style={inputStyle}
       />
     </label>
@@ -339,6 +412,14 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
   maxWidth: "100%",
   boxSizing: "border-box"
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  color: "var(--muted)",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase"
 };
 
 const closeButtonStyle: React.CSSProperties = {
