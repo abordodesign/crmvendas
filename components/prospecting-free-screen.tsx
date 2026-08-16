@@ -25,6 +25,16 @@ export function ProspectingFreeScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  function handleGoogleMapsSearch() {
+    if (!term.trim()) {
+      setErrorMessage("Informe o que deseja buscar antes de abrir o Google Maps.");
+      return;
+    }
+
+    setErrorMessage(null);
+    window.open(buildGoogleMapsSearchUrl([term.trim(), region.trim()].filter(Boolean).join(" em ")), "_blank", "noopener,noreferrer");
+  }
+
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -64,7 +74,7 @@ export function ProspectingFreeScreen() {
     <CrmShell
       activePath="/dashboard/prospecting-free"
       title="Prospeccao gratis"
-      subtitle="Pesquisa de empresas com dados do OpenStreetMap (Nominatim)."
+      subtitle="Pesquisa gratuita no OpenStreetMap com acesso complementar ao Google Maps."
       primaryAction="Buscar empresas"
     >
       <section style={cardStyle}>
@@ -98,13 +108,27 @@ export function ProspectingFreeScreen() {
             </label>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-            <div style={hintStyle}>Fonte gratuita. Podem existir lacunas em telefone/site dependendo do cadastro no OSM.</div>
-            <button type="submit" disabled={isPending} style={buttonStyle}>
-              {isPending ? "Consultando..." : "Pesquisar no OpenStreetMap"}
-            </button>
+            <div style={hintStyle}>
+              Busca automática pelo OpenStreetMap e consulta manual gratuita no Google Maps, sem chave de API.
+            </div>
+            <div style={actionRowStyle}>
+              <button type="button" onClick={handleGoogleMapsSearch} style={googleMapsButtonStyle}>
+                Buscar tambem no Google Maps
+              </button>
+              <button type="submit" disabled={isPending} style={buttonStyle}>
+                {isPending ? "Consultando..." : "Pesquisar no OpenStreetMap"}
+              </button>
+            </div>
           </div>
           {errorMessage ? <div style={errorStyle}>{errorMessage}</div> : null}
         </form>
+      </section>
+
+      <section style={googleMapsInfoStyle}>
+        <div style={{ fontWeight: 900 }}>Google Maps gratuito</div>
+        <div style={googleMapsInfoTextStyle}>
+          A busca abre diretamente no Google Maps. Os resultados do Google nao sao importados automaticamente para o CRM.
+        </div>
       </section>
 
       <section style={cardStyle}>
@@ -125,6 +149,11 @@ export function ProspectingFreeScreen() {
                 <ResultCell label="Latitude" value={item.latitude !== null ? item.latitude.toFixed(6) : "-"} />
                 <ResultCell label="Longitude" value={item.longitude !== null ? item.longitude.toFixed(6) : "-"} />
                 <ResultCell label="OpenStreetMap" value="Abrir registro" href={item.osmUrl} />
+                <ResultCell
+                  label="Google Maps"
+                  value="Localizar no Maps"
+                  href={buildGoogleMapsSearchUrl([item.name, item.address].filter(Boolean).join(", "))}
+                />
               </div>
             </article>
           ))}
@@ -133,9 +162,26 @@ export function ProspectingFreeScreen() {
             <div style={emptyStyle}>Nenhum resultado ainda. Preencha os filtros e clique em pesquisar.</div>
           ) : null}
         </div>
+
+        <div style={attributionStyle}>
+          Dados da busca automatica: ©{" "}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={linkStyle}>
+            colaboradores do OpenStreetMap
+          </a>{" "}
+          (ODbL).
+        </div>
       </section>
     </CrmShell>
   );
+}
+
+function buildGoogleMapsSearchUrl(query: string) {
+  const params = new URLSearchParams({
+    api: "1",
+    query: query.trim()
+  });
+
+  return `https://www.google.com/maps/search/?${params.toString()}`;
 }
 
 function ResultCell({
@@ -212,6 +258,33 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer"
 };
 
+const actionRowStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap"
+};
+
+const googleMapsButtonStyle: React.CSSProperties = {
+  ...buttonStyle,
+  background: "#ffffff",
+  color: "var(--accent)",
+  border: "1px solid rgba(79, 70, 229, 0.22)"
+};
+
+const googleMapsInfoStyle: React.CSSProperties = {
+  padding: "16px 18px",
+  borderRadius: 20,
+  background: "linear-gradient(135deg, rgba(79, 70, 229, 0.06), rgba(20, 184, 166, 0.08))",
+  border: "1px solid rgba(79, 70, 229, 0.12)"
+};
+
+const googleMapsInfoTextStyle: React.CSSProperties = {
+  marginTop: 6,
+  color: "var(--muted)",
+  fontSize: 13,
+  lineHeight: 1.5
+};
+
 const hintStyle: React.CSSProperties = {
   color: "var(--muted)",
   fontSize: 13
@@ -254,6 +327,13 @@ const emptyStyle: React.CSSProperties = {
   border: "1px dashed var(--line)",
   color: "var(--muted)",
   fontSize: 13
+};
+
+const attributionStyle: React.CSSProperties = {
+  marginTop: 14,
+  color: "var(--muted)",
+  fontSize: 11,
+  lineHeight: 1.5
 };
 
 const linkStyle: React.CSSProperties = {
