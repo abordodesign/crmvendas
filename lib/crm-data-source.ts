@@ -917,6 +917,7 @@ type PipelineStatsSourceOpportunity = {
   amount: number;
   leadSource?: string;
   createdAt?: string;
+  concludedAt?: string;
   expectedCloseDate: string | null;
   status: string;
 };
@@ -928,6 +929,7 @@ function normalizePipelineStatsOpportunity(input: {
   amount: number;
   leadSource?: string;
   createdAt?: string;
+  concludedAt?: string;
   expectedCloseDate: string | null;
   status: string;
 }): PipelineStatsSourceOpportunity {
@@ -938,6 +940,7 @@ function normalizePipelineStatsOpportunity(input: {
     amount: Math.max(0, input.amount),
     leadSource: input.leadSource?.trim() || undefined,
     createdAt: input.createdAt ?? undefined,
+    concludedAt: input.concludedAt ?? undefined,
     expectedCloseDate: input.expectedCloseDate,
     status: input.status
   };
@@ -1005,22 +1008,30 @@ function buildConversionMetrics(items: PipelineStatsSourceOpportunity[]) {
   ];
 }
 
-function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], periodDays: number): PipelineStatistics {
+function computePipelineStatistics(
+  items: PipelineStatsSourceOpportunity[],
+  periodDays: number,
+  customPeriod?: { start: Date; end: Date }
+): PipelineStatistics {
   const openItems = items.filter(isOpenPipelineOpportunity);
   const now = new Date();
-  const periodStart = new Date(now.getTime() - Math.max(0, periodDays - 1) * 86400000);
-  const periodItems = items.filter((item) => {
-    if (!item.createdAt) {
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const periodStart = customPeriod?.start ?? new Date(now.getTime() - Math.max(0, periodDays - 1) * 86400000);
+  const periodEnd = customPeriod?.end ?? now;
+  const isWithinPeriod = (value: string | undefined) => {
+    if (!value) {
       return false;
     }
 
-    const parsed = new Date(item.createdAt);
-    return !Number.isNaN(parsed.getTime()) && parsed.getTime() >= periodStart.getTime();
-  });
+    const parsed = new Date(value);
+    return !Number.isNaN(parsed.getTime()) && parsed.getTime() >= periodStart.getTime() && parsed.getTime() <= periodEnd.getTime();
+  };
+  const periodItems = items.filter((item) => isWithinPeriod(item.createdAt));
+  const concludedPeriodItems = items.filter((item) => isWithinPeriod(item.concludedAt));
   const totalPipeline = openItems.reduce((sum, item) => sum + item.amount, 0);
   const weightedPipeline = openItems.reduce((sum, item) => sum + item.amount * (item.probability / 100), 0);
   const averageProbability = totalPipeline > 0 ? Math.round((weightedPipeline / totalPipeline) * 100) : 0;
-  const lostRevenue = periodItems
+  const lostRevenue = concludedPeriodItems
     .filter((item) => mapUiOpportunityStatusToDb(item.status) === "lost")
     .reduce((sum, item) => sum + item.amount, 0);
   const dueThisMonth = openItems.filter((item) => {
@@ -1042,7 +1053,7 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], peri
         time: parsed.getTime()
       };
     })
-    .filter((item): item is { raw: string; time: number } => Boolean(item))
+    .filter((item): item is { raw: string; time: number } => item !== null && item.time >= todayStart)
     .sort((left, right) => left.time - right.time)[0];
   const grouped = new Map<string, PipelineStatistics["byStage"][number]>();
   const leadSources = new Map<string, { source: string; count: number; total: number }>();
@@ -1091,7 +1102,7 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], peri
     leadsThisMonth: periodItems.length,
     opportunitiesCount: periodValidItems.filter((item) => stageProgressIndex(item.stage) >= 1).length,
     proposalsCount: periodValidItems.filter((item) => stageProgressIndex(item.stage) >= 3).length,
-    salesCount: periodItems.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length,
+    salesCount: concludedPeriodItems.filter((item) => mapUiOpportunityStatusToDb(item.status) === "won").length,
     lostRevenue,
     totalPipeline,
     weightedPipeline,
@@ -1100,7 +1111,12 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], peri
     openOpportunities: openItems.length,
     dueThisMonth: dueThisMonth.length,
     nearestCloseDate: nearestClose?.raw ?? null,
-    byStage: Array.from(grouped.values()).sort((left, right) => right.total - left.total),
+    byStage: Array.from(grouped.values())
+      .map((item) => ({
+        ...item,
+        probability: item.total > 0 ? Math.round((item.weightedTotal / item.total) * 100) : item.probability
+      }))
+      .sort((left, right) => right.total - left.total),
     leadSources: Array.from(leadSources.values())
       .sort((left, right) => right.count - left.count || right.total - left.total)
       .map((item) => ({
@@ -1121,8 +1137,25 @@ function computePipelineStatistics(items: PipelineStatsSourceOpportunity[], peri
   };
 }
 
-export async function getPipelineStatistics(periodDays = 30): Promise<PipelineStatistics> {
-  return getCachedQuery(`pipeline:statistics:${periodDays}`, async () => {
+export async function getPipelineStatistics(
+  periodDays = 30,
+  customRange?: { startDate: string; endDate: string }
+): Promise<PipelineStatistics> {
+  const customStart = customRange?.startDate ? new Date(`${customRange.startDate}T00:00:00`) : null;
+  const customEnd = customRange?.endDate ? new Date(`${customRange.endDate}T23:59:59.999`) : null;
+  const validCustomPeriod =
+    customStart &&
+    customEnd &&
+    !Number.isNaN(customStart.getTime()) &&
+    !Number.isNaN(customEnd.getTime()) &&
+    customStart.getTime() <= customEnd.getTime()
+      ? { start: customStart, end: customEnd }
+      : undefined;
+  const rangeCacheKey = validCustomPeriod
+    ? `${customRange?.startDate ?? ""}:${customRange?.endDate ?? ""}`
+    : "rolling";
+
+  return getCachedQuery(`pipeline:statistics:${periodDays}:${rangeCacheKey}`, async () => {
     const opportunities = await getOpportunities();
 
     const items = opportunities.map((item) =>
@@ -1133,6 +1166,7 @@ export async function getPipelineStatistics(periodDays = 30): Promise<PipelineSt
         amount: amountLabelToNumber(item.amount),
         leadSource: item.leadSource,
         createdAt: item.createdAt,
+        concludedAt: item.concludedAt,
         expectedCloseDate: (() => {
           const parsed = parseDisplayDate(item.expectedCloseDate);
           return parsed ? parsed.toISOString() : null;
@@ -1140,7 +1174,7 @@ export async function getPipelineStatistics(periodDays = 30): Promise<PipelineSt
         status: item.status
       })
     );
-    return computePipelineStatistics(items, periodDays);
+    return computePipelineStatistics(items, periodDays, validCustomPeriod);
   });
 }
 
@@ -1369,7 +1403,7 @@ export async function getPipelineAttention(limit = 15): Promise<PipelineAttentio
       });
 
     const items = attentionItems.slice(0, Math.max(1, limit));
-    const summary = items.reduce(
+    const summary = attentionItems.reduce(
       (acc, item) => {
         acc[item.level] += 1;
         return acc;
@@ -1381,7 +1415,7 @@ export async function getPipelineAttention(limit = 15): Promise<PipelineAttentio
       generatedAt: new Date().toISOString(),
       summary: {
         ...summary,
-        monitored: items.length
+        monitored: attentionItems.length
       },
       items
     };

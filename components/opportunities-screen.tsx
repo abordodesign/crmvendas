@@ -86,6 +86,8 @@ export function OpportunitiesScreen() {
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [recentlyMovedOpportunityId, setRecentlyMovedOpportunityId] = useState<string | null>(null);
   const [nearestOpenCloseDate, setNearestOpenCloseDate] = useState<string | null>(null);
+  const [openOpportunityCount, setOpenOpportunityCount] = useState(0);
+  const [totalOpenPipeline, setTotalOpenPipeline] = useState(0);
   const [averageProbability, setAverageProbability] = useState(0);
   const [forecastMonth, setForecastMonth] = useState(0);
   const [opportunityNotes, setOpportunityNotes] = useState<OpportunityNote[]>([]);
@@ -144,6 +146,8 @@ export function OpportunitiesScreen() {
         setAccounts(refs.accounts);
         setStages(refs.stages);
         setNearestOpenCloseDate(stats.nearestCloseDate);
+        setOpenOpportunityCount(stats.openOpportunities);
+        setTotalOpenPipeline(stats.totalPipeline);
         setAverageProbability(stats.averageProbability);
         setForecastMonth(stats.forecastMonth);
         setAccountId((current) => current || refs.accounts[0]?.id || "");
@@ -163,10 +167,6 @@ export function OpportunitiesScreen() {
     };
   }, []);
 
-  const totalAmount = useMemo(
-    () => opportunities.reduce((sum, item) => sum + amountToNumber(item.amount), 0),
-    [opportunities]
-  );
   const calculatedTicket = useMemo(() => {
     const baseAmount = parseCurrencyInput(amount);
     const multiplier = isRecurring ? Math.max(1, Number(months || 1)) : 1;
@@ -916,11 +916,11 @@ export function OpportunitiesScreen() {
           gap: 16
         }}
       >
-        <MetricCard label="Oportunidades" value={String(opportunities.length)} />
-        <MetricCard label="Pipeline" value={formatCurrency(totalAmount)} />
+        <MetricCard label="Oportunidades abertas" value={String(openOpportunityCount)} />
+        <MetricCard label="Pipeline aberto" value={formatCurrency(totalOpenPipeline)} />
         <MetricCard label="Probabilidade media" value={`${averageProbability}%`} />
         <MetricCard label="Previsao do mes" value={formatCurrency(forecastMonth)} />
-        <MetricCard label="Fechamento mais proximo" value={formatNearestCloseDate(nearestOpenCloseDate)} />
+        <MetricCard label="Proximo fechamento" value={formatNearestCloseDate(nearestOpenCloseDate)} />
       </section>
 
       <section

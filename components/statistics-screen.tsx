@@ -8,9 +8,12 @@ import { defaultCrmSettings, getCrmSettings, subscribeCrmSettingsChanged } from 
 import type { PipelineAttentionData, PipelineAttentionItem, PipelineStatistics } from "@/types/crm-app";
 
 const periodOptions = [
+  { id: "7d", label: "7 dias", days: 7 },
+  { id: "15d", label: "15 dias", days: 15 },
   { id: "30d", label: "30 dias", days: 30 },
-  { id: "6m", label: "6 meses", days: 180 },
-  { id: "12m", label: "12 meses", days: 365 }
+  { id: "60d", label: "60 dias", days: 60 },
+  { id: "90d", label: "90 dias", days: 90 },
+  { id: "custom", label: "Personalizado", days: null }
 ] as const;
 
 const emptyStatistics: PipelineStatistics = {
@@ -49,7 +52,16 @@ export function StatisticsScreen() {
   const [attention, setAttention] = useState<PipelineAttentionData>(emptyAttention);
   const [settings, setSettings] = useState(defaultCrmSettings);
   const [periodId, setPeriodId] = useState<(typeof periodOptions)[number]["id"]>("30d");
+  const [customStartDate, setCustomStartDate] = useState(() => dateInputDaysAgo(29));
+  const [customEndDate, setCustomEndDate] = useState(() => localDateInput(new Date()));
   const activePeriod = periodOptions.find((item) => item.id === periodId) ?? periodOptions[0];
+  const isCustomPeriod = periodId === "custom";
+  const isCustomPeriodValid =
+    Boolean(customStartDate && customEndDate) && customStartDate <= customEndDate;
+  const periodDescription = isCustomPeriod
+    ? `entre ${formatDateInputLabel(customStartDate)} e ${formatDateInputLabel(customEndDate)}`
+    : `nos ultimos ${activePeriod.label}`;
+  const periodHeading = isCustomPeriod ? "no periodo personalizado" : `em ${activePeriod.label}`;
 
   useEffect(() => {
     void runPipelineAttentionAgent();
@@ -80,8 +92,20 @@ export function StatisticsScreen() {
   useEffect(() => {
     let isMounted = true;
 
+    if (isCustomPeriod && !isCustomPeriodValid) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
     async function load() {
-      const [nextStats, nextAttention] = await Promise.all([getPipelineStatistics(activePeriod.days), getPipelineAttention(12)]);
+      const [nextStats, nextAttention] = await Promise.all([
+        getPipelineStatistics(
+          activePeriod.days ?? 30,
+          isCustomPeriod ? { startDate: customStartDate, endDate: customEndDate } : undefined
+        ),
+        getPipelineAttention(12)
+      ]);
 
       if (isMounted) {
         setStats(nextStats);
@@ -94,7 +118,7 @@ export function StatisticsScreen() {
     return () => {
       isMounted = false;
     };
-  }, [activePeriod.days]);
+  }, [activePeriod.days, customEndDate, customStartDate, isCustomPeriod, isCustomPeriodValid]);
 
   return (
     <CrmShell
@@ -129,28 +153,54 @@ export function StatisticsScreen() {
                 </button>
               );
             })}
+            {isCustomPeriod ? (
+              <div style={customRangeStyle}>
+                <label style={customDateLabelStyle}>
+                  De
+                  <input
+                    type="date"
+                    value={customStartDate}
+                    max={customEndDate || localDateInput(new Date())}
+                    onChange={(event) => setCustomStartDate(event.target.value)}
+                    style={customDateInputStyle}
+                  />
+                </label>
+                <label style={customDateLabelStyle}>
+                  Ate
+                  <input
+                    type="date"
+                    value={customEndDate}
+                    min={customStartDate}
+                    max={localDateInput(new Date())}
+                    onChange={(event) => setCustomEndDate(event.target.value)}
+                    style={customDateInputStyle}
+                  />
+                </label>
+                {!isCustomPeriodValid ? <span style={customRangeErrorStyle}>Informe um intervalo valido.</span> : null}
+              </div>
+            ) : null}
           </div>
         </div>
         <div style={kpiGridStyle}>
           <MetricCard
             label="Leads do periodo"
             value={String(stats.leadsThisMonth)}
-            detail={`Oportunidades criadas nos ultimos ${activePeriod.label}.`}
+            detail={`Oportunidades criadas ${periodDescription}.`}
           />
           <MetricCard
             label="Oportunidades"
             value={String(stats.opportunitiesCount)}
-            detail={`Leads que avancaram para contato/qualificacao em ${activePeriod.label}.`}
+            detail={`Leads que avancaram para contato/qualificacao ${periodDescription}.`}
           />
           <MetricCard
             label="Propostas"
             value={String(stats.proposalsCount)}
-            detail={`Negocios que chegaram em proposta enviada em ${activePeriod.label}.`}
+            detail={`Negocios que chegaram em proposta enviada ${periodDescription}.`}
           />
           <MetricCard
             label="Vendas"
             value={String(stats.salesCount)}
-            detail={`Oportunidades concluidas como ganho em ${activePeriod.label}.`}
+            detail={`Oportunidades concluidas como ganho ${periodDescription}.`}
           />
         </div>
       </section>
@@ -183,7 +233,7 @@ export function StatisticsScreen() {
           <MetricCard
             label="Oportunidades perdidas"
             value={formatCurrency(stats.lostRevenue)}
-            detail={`Valor total perdido em ${activePeriod.label}.`}
+            detail={`Valor total perdido ${periodDescription}.`}
           />
           <MetricCard
             label="Pipeline ponderado"
@@ -265,7 +315,7 @@ export function StatisticsScreen() {
           <h2 style={titleStyle}>Janela comercial</h2>
           <div style={compactGridStyle}>
             <StatBlock label="Fecham neste mes" value={String(stats.dueThisMonth)} />
-            <StatBlock label="Fechamento mais proximo" value={formatDateLabel(stats.nearestCloseDate)} />
+            <StatBlock label="Proximo fechamento" value={formatDateLabel(stats.nearestCloseDate)} />
             <StatBlock
               label="Ticket esperado"
               value={stats.openOpportunities ? formatCurrency(stats.weightedPipeline / stats.openOpportunities) : "R$ 0,00"}
@@ -309,7 +359,7 @@ export function StatisticsScreen() {
         <div style={sectionHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Conversao do funil</div>
-            <h2 style={titleStyle}>Taxa de avanco entre etapas em {activePeriod.label}</h2>
+            <h2 style={titleStyle}>Taxa de avanco entre etapas {periodHeading}</h2>
           </div>
         </div>
         <div style={conversionGridStyle}>
@@ -359,7 +409,7 @@ export function StatisticsScreen() {
         <div style={sectionHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Origem dos leads</div>
-            <h2 style={titleStyle}>Canais que geraram leads em {activePeriod.label}</h2>
+            <h2 style={titleStyle}>Canais que geraram leads {periodHeading}</h2>
           </div>
         </div>
         <div style={sourceGridStyle}>
@@ -384,7 +434,7 @@ export function StatisticsScreen() {
         <div style={sectionHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Conversao por origem</div>
-            <h2 style={titleStyle}>Qualidade de cada canal em {activePeriod.label}</h2>
+            <h2 style={titleStyle}>Qualidade de cada canal {periodHeading}</h2>
           </div>
         </div>
         <div style={sourceConversionGridStyle}>
@@ -453,6 +503,28 @@ function AttentionSummaryCard({
       <div style={statValueStyle}>{value}</div>
     </article>
   );
+}
+
+function localDateInput(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function dateInputDaysAgo(daysAgo: number) {
+  const date = new Date();
+  date.setDate(date.getDate() - Math.max(0, daysAgo));
+  return localDateInput(date);
+}
+
+function formatDateInputLabel(value: string) {
+  if (!value) {
+    return "data nao informada";
+  }
+
+  const parsed = new Date(`${value}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? "data invalida" : parsed.toLocaleDateString("pt-BR");
 }
 
 function formatCurrency(value: number) {
@@ -566,7 +638,8 @@ const summaryBadgeStyle: React.CSSProperties = {
 const periodFilterRowStyle: React.CSSProperties = {
   display: "flex",
   gap: 8,
-  flexWrap: "wrap"
+  flexWrap: "wrap",
+  justifyContent: "flex-end"
 };
 
 const periodFilterButtonStyle: React.CSSProperties = {
@@ -578,6 +651,43 @@ const periodFilterButtonStyle: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 800,
   cursor: "pointer"
+};
+
+const customRangeStyle: React.CSSProperties = {
+  flexBasis: "100%",
+  display: "flex",
+  justifyContent: "flex-end",
+  alignItems: "flex-end",
+  gap: 8,
+  flexWrap: "wrap"
+};
+
+const customDateLabelStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 5,
+  color: "var(--muted)",
+  fontSize: 10,
+  fontWeight: 800,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase"
+};
+
+const customDateInputStyle: React.CSSProperties = {
+  minHeight: 38,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "7px 10px",
+  background: "#ffffff",
+  color: "var(--foreground)",
+  fontSize: 12,
+  fontWeight: 700
+};
+
+const customRangeErrorStyle: React.CSSProperties = {
+  alignSelf: "center",
+  color: "#991b1b",
+  fontSize: 11,
+  fontWeight: 700
 };
 
 const kpiGridStyle: React.CSSProperties = {
