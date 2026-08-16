@@ -966,15 +966,7 @@ function getClosedRevenueThisMonth(items: OpportunityItem[], referenceDate = new
       return sum;
     }
 
-    const totalValue = amountLabelToNumber(item.amount);
-    const baseValue = amountLabelToNumber(item.baseAmount);
-    const recognizedValue = item.isRecurring
-      ? baseValue > 0
-        ? baseValue
-        : totalValue / Math.max(1, item.months || 1)
-      : totalValue;
-
-    return sum + recognizedValue;
+    return sum + amountLabelToNumber(item.amount);
   }, 0);
 }
 

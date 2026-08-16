@@ -68,7 +68,7 @@ export function MetasScreen() {
     () =>
       opportunities
         .filter((item) => isWonOpportunity(item) && isDateInCurrentMonth(item.concludedAt))
-        .reduce((sum, item) => sum + monthlyOpportunityValue(item), 0),
+        .reduce((sum, item) => sum + opportunityTicketValue(item), 0),
     [opportunities]
   );
   const existingPipeline = useMemo(
@@ -80,7 +80,7 @@ export function MetasScreen() {
             !isConclusionStage(item.stage) &&
             isDateInCurrentMonth(item.expectedCloseDate)
         )
-        .reduce((sum, item) => sum + monthlyOpportunityValue(item), 0),
+        .reduce((sum, item) => sum + opportunityTicketValue(item), 0),
     [opportunities]
   );
   const remainingRevenue = Math.max(monthlyGoal - achievedRevenue, 0);
@@ -334,15 +334,8 @@ function currencyToNumber(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function monthlyOpportunityValue(item: OpportunityItem) {
-  const totalValue = currencyToNumber(item.amount);
-
-  if (!item.isRecurring) {
-    return totalValue;
-  }
-
-  const baseValue = currencyToNumber(item.baseAmount);
-  return baseValue > 0 ? baseValue : totalValue / Math.max(1, item.months || 1);
+function opportunityTicketValue(item: OpportunityItem) {
+  return currencyToNumber(item.amount);
 }
 
 function normalizedOpportunityStatus(value: string) {
