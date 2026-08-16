@@ -2,14 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { CrmShell } from "@/components/crm-shell";
-import { getDashboardData, subscribeCrmDataChanged } from "@/lib/crm-data-source";
+import { getOpportunities, isConclusionStage, subscribeCrmDataChanged } from "@/lib/crm-data-source";
 import { parseCurrencyInput } from "@/lib/currency-input";
-import { seedDashboardData } from "@/lib/crm-seed";
 import { getCrmSettings, saveCrmSettings, subscribeCrmSettingsChanged } from "@/lib/crm-settings";
-import type { DashboardData } from "@/types/crm-app";
+import type { OpportunityItem } from "@/types/crm-app";
 
 export function MetasScreen() {
-  const [data, setData] = useState<DashboardData>(seedDashboardData);
+  const [opportunities, setOpportunities] = useState<OpportunityItem[]>([]);
   const [goalInput, setGoalInput] = useState("");
   const [savedGoal, setSavedGoal] = useState(0);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -21,10 +20,10 @@ export function MetasScreen() {
     let isMounted = true;
 
     async function load() {
-      const nextData = await getDashboardData();
+      const nextOpportunities = await getOpportunities();
 
       if (isMounted) {
-        setData(nextData);
+        setOpportunities(nextOpportunities);
       }
     }
 
@@ -66,12 +65,23 @@ export function MetasScreen() {
 
   const monthlyGoal = parseCurrencyInput(goalInput);
   const achievedRevenue = useMemo(
-    () => currencyToNumber(data.kpis.find((item) => item.label === "Receita do mes")?.value ?? "R$ 0,00"),
-    [data.kpis]
+    () =>
+      opportunities
+        .filter((item) => isWonOpportunity(item) && isDateInCurrentMonth(item.concludedAt))
+        .reduce((sum, item) => sum + monthlyOpportunityValue(item), 0),
+    [opportunities]
   );
   const existingPipeline = useMemo(
-    () => data.pipeline.reduce((sum, column) => sum + currencyToNumber(column.total), 0),
-    [data.pipeline]
+    () =>
+      opportunities
+        .filter(
+          (item) =>
+            isOpenOpportunity(item) &&
+            !isConclusionStage(item.stage) &&
+            isDateInCurrentMonth(item.expectedCloseDate)
+        )
+        .reduce((sum, item) => sum + monthlyOpportunityValue(item), 0),
+    [opportunities]
   );
   const remainingRevenue = Math.max(monthlyGoal - achievedRevenue, 0);
   const requiredPipeline = remainingRevenue * 3;
@@ -117,9 +127,9 @@ export function MetasScreen() {
         <div style={heroHeaderStyle}>
           <div>
             <div style={eyebrowStyle}>Saude do pipeline</div>
-            <h2 style={titleStyle}>Meta editavel, leitura travada</h2>
+            <h2 style={titleStyle}>Meta editavel, leitura automatica</h2>
             <div style={subtitleStyle}>
-              Apenas o campo de meta pode ser alterado. Os demais indicadores ficam travados e so atualizam quando voce salvar a nova meta.
+              A meta e persistida ao salvar. Os demais indicadores acompanham automaticamente as oportunidades do mes atual.
             </div>
           </div>
           <div style={{ ...healthBadgeStyle, ...healthBadgeToneStyle(healthTone) }}>
@@ -206,12 +216,12 @@ export function MetasScreen() {
               onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Falta realizar" : null)}
             />
             <SummaryCard
-              label="Saude travada"
+              label="Saude atual"
               value={formatPercent(pipelineHealth)}
               detail="Leitura automatica do pipeline em relacao a meta."
               tone={healthTone}
-              isHovered={hoveredSummaryLabel === "Saude travada"}
-              onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Saude travada" : null)}
+              isHovered={hoveredSummaryLabel === "Saude atual"}
+              onHoverChange={(hovered) => setHoveredSummaryLabel(hovered ? "Saude atual" : null)}
             />
           </div>
         </article>
@@ -322,6 +332,61 @@ function currencyToNumber(value: string) {
   const normalized = value.replace(/\s/g, "").replace("R$", "").replace(/\./g, "").replace(",", ".");
   const numeric = Number(normalized);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function monthlyOpportunityValue(item: OpportunityItem) {
+  const totalValue = currencyToNumber(item.amount);
+
+  if (!item.isRecurring) {
+    return totalValue;
+  }
+
+  const baseValue = currencyToNumber(item.baseAmount);
+  return baseValue > 0 ? baseValue : totalValue / Math.max(1, item.months || 1);
+}
+
+function normalizedOpportunityStatus(value: string) {
+  return value.trim().toLocaleLowerCase("pt-BR");
+}
+
+function isWonOpportunity(item: OpportunityItem) {
+  const status = normalizedOpportunityStatus(item.status);
+  return status.includes("conquist") || status === "won";
+}
+
+function isOpenOpportunity(item: OpportunityItem) {
+  const status = normalizedOpportunityStatus(item.status);
+  const isLost =
+    status.includes("perd") ||
+    status.includes("cancel") ||
+    status.includes("suspens") ||
+    status === "lost";
+
+  return !isWonOpportunity(item) && !isLost;
+}
+
+function parseOpportunityDate(value: string | undefined) {
+  if (!value || value === "Sem data") {
+    return null;
+  }
+
+  const brazilianDate = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const parsed = brazilianDate
+    ? new Date(Number(brazilianDate[3]), Number(brazilianDate[2]) - 1, Number(brazilianDate[1]), 12)
+    : new Date(value);
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function isDateInCurrentMonth(value: string | undefined) {
+  const date = parseOpportunityDate(value);
+
+  if (!date) {
+    return false;
+  }
+
+  const now = new Date();
+  return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
 }
 
 function formatCurrency(value: number) {

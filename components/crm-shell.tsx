@@ -127,6 +127,14 @@ function normalizeAppRole(value: unknown): AppRole | null {
   return null;
 }
 
+function formatCurrentMonth() {
+  const now = new Date();
+  const month = new Intl.DateTimeFormat("pt-BR", { month: "short" }).format(now).replace(".", "");
+  const label = `${month} ${now.getFullYear()}`;
+
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 export function CrmShell({
   activePath,
   title,
@@ -148,6 +156,7 @@ export function CrmShell({
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [notificationModuleFilter, setNotificationModuleFilter] = useState<(typeof notificationModuleOptions)[number]["id"]>("all");
   const [settings, setSettings] = useState(defaultCrmSettings);
+  const [currentMonth, setCurrentMonth] = useState(formatCurrentMonth);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -156,6 +165,15 @@ export function CrmShell({
     });
     router.push("/login");
   }
+
+  useEffect(() => {
+    const refreshCurrentMonth = () => setCurrentMonth(formatCurrentMonth());
+
+    refreshCurrentMonth();
+    const intervalId = window.setInterval(refreshCurrentMonth, 60 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -513,7 +531,9 @@ export function CrmShell({
                   <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 14 }}>{subtitle}</div>
                 </div>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <div style={pillStyle}>Mar 2026</div>
+                  <div style={pillStyle} suppressHydrationWarning>
+                    {currentMonth}
+                  </div>
                   <div style={pillStyle}>{formatRoleLabel(authState.role)}</div>
                   {settings.features.notifications_center ? (
                   <div style={{ position: "relative" }}>

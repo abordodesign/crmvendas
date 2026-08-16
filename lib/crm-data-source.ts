@@ -90,7 +90,6 @@ const WEEKLY_METRIC_PREFIX = "weekly_metric:";
 const AGENT_TASK_PREFIX = "[AGENTE PIPELINE]";
 const USER_CONTEXT_CACHE_TTL_MS = 5000;
 const QUERY_CACHE_TTL_MS = 4000;
-const DASHBOARD_PIPELINE_LIMIT = 120;
 const REFERENCE_ITEMS_LIMIT = 200;
 const MAX_AGENT_HISTORY_ITEMS = 40;
 
@@ -851,6 +850,10 @@ function buildPipelineFromOpportunities(items: OpportunityItem[]): PipelineColum
   const grouped = new Map<string, PipelineColumn>();
 
   items.forEach((opportunity) => {
+    if (mapUiOpportunityStatusToDb(opportunity.status) !== "open" || isConclusionStage(opportunity.stage)) {
+      return;
+    }
+
     const stageKey = opportunity.stage || "Sem etapa";
 
     if (!grouped.has(stageKey)) {
@@ -963,7 +966,15 @@ function getClosedRevenueThisMonth(items: OpportunityItem[], referenceDate = new
       return sum;
     }
 
-    return sum + amountLabelToNumber(item.amount);
+    const totalValue = amountLabelToNumber(item.amount);
+    const baseValue = amountLabelToNumber(item.baseAmount);
+    const recognizedValue = item.isRecurring
+      ? baseValue > 0
+        ? baseValue
+        : totalValue / Math.max(1, item.months || 1)
+      : totalValue;
+
+    return sum + recognizedValue;
   }, 0);
 }
 
@@ -2068,8 +2079,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         .select(
           "id, title, amount, base_amount, is_recurring, months, stage_id, owner_id, status, expected_close_date, concluded_at, accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
-        .order("created_at", { ascending: false })
-        .limit(DASHBOARD_PIPELINE_LIMIT),
+        .order("created_at", { ascending: false }),
       supabase
         .from("tasks")
         .select(
@@ -2108,17 +2118,20 @@ export async function getDashboardData(): Promise<DashboardData> {
       if (localPreviews.length) {
         const merged = mergeOpportunities(localPreviews, seedOpportunities);
         const pipeline = buildPipelineFromOpportunities(merged);
-        const totalPipeline = merged.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
-        const recurringTotal = merged
+        const openMerged = merged.filter(
+          (item) => mapUiOpportunityStatusToDb(item.status) === "open" && !isConclusionStage(item.stage)
+        );
+        const totalPipeline = openMerged.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+        const recurringTotal = openMerged
           .filter((item) => item.isRecurring)
           .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
         const monthRevenue = getClosedRevenueThisMonth(merged);
-        const averageTicket = merged.length ? totalPipeline / merged.length : 0;
+        const averageTicket = openMerged.length ? totalPipeline / openMerged.length : 0;
 
         return {
           ...seedDashboardData,
           kpis: [
-            { label: "Pipeline total", value: currency(totalPipeline), trend: `${merged.length} oportunidades` },
+            { label: "Pipeline total", value: currency(totalPipeline), trend: `${openMerged.length} oportunidades abertas` },
             { label: "Ticket medio", value: currency(averageTicket), trend: "Media por oportunidade" },
             {
               label: "Receita recorrente",
@@ -2160,6 +2173,10 @@ export async function getDashboardData(): Promise<DashboardData> {
       const stageName = normalizeStageLabel(stageNames.get(stageId) ?? "Sem etapa");
       const account = pickOne(opportunity.accounts);
       const owner = pickOne(opportunity.profiles);
+
+      if (mapUiOpportunityStatusToDb(opportunity.status) !== "open" || isConclusionStage(stageName)) {
+        return;
+      }
 
       if (!grouped.has(stageId)) {
         grouped.set(stageId, {
@@ -2257,12 +2274,17 @@ export async function getDashboardData(): Promise<DashboardData> {
         };
       }) ?? seedActivity;
 
-    const opportunityCount = opportunitiesRes.data?.length ?? 0;
+    const openFetchedRecords =
+      opportunitiesRes.data?.filter((opportunity) => {
+        const stageName = normalizeStageLabel(stageNames.get(opportunity.stage_id ?? "") ?? "Sem etapa");
+        return mapUiOpportunityStatusToDb(opportunity.status) === "open" && !isConclusionStage(stageName);
+      }) ?? [];
+    const opportunityCount = openFetchedRecords.length;
     const accountsCount = accountsRes.count ?? 0;
-    const totalPipeline = opportunitiesRes.data?.reduce(
+    const totalPipeline = openFetchedRecords.reduce(
       (sum, opportunity) => sum + (typeof opportunity.amount === "number" ? opportunity.amount : 0),
       0
-    ) ?? 0;
+    );
 
     const fetchedOpportunities =
       opportunitiesRes.data?.map((opportunity) => {
@@ -2293,19 +2315,22 @@ export async function getDashboardData(): Promise<DashboardData> {
 
     const mergedOpportunities = mergeOpportunities(localPreviews, fetchedOpportunities);
     const mergedPipeline = mergedOpportunities.length ? buildPipelineFromOpportunities(mergedOpportunities) : [];
-    const mergedTotal = mergedOpportunities.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
-    const recurringTotal = mergedOpportunities
+    const openMergedOpportunities = mergedOpportunities.filter(
+      (item) => mapUiOpportunityStatusToDb(item.status) === "open" && !isConclusionStage(item.stage)
+    );
+    const mergedTotal = openMergedOpportunities.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+    const recurringTotal = openMergedOpportunities
       .filter((item) => item.isRecurring)
       .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
     const monthRevenue = getClosedRevenueThisMonth(mergedOpportunities);
-    const averageTicket = mergedOpportunities.length ? mergedTotal / mergedOpportunities.length : 0;
+    const averageTicket = openMergedOpportunities.length ? mergedTotal / openMergedOpportunities.length : 0;
 
     return {
       kpis: [
         {
           label: "Pipeline total",
           value: currency(mergedOpportunities.length ? mergedTotal : totalPipeline),
-          trend: `${mergedOpportunities.length || opportunityCount} oportunidades`
+          trend: `${mergedOpportunities.length ? openMergedOpportunities.length : opportunityCount} oportunidades abertas`
         },
         {
           label: "Ticket medio",
@@ -2315,7 +2340,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         {
           label: "Receita recorrente",
           value: currency(recurringTotal),
-          trend: mergedOpportunities.some((item) => item.isRecurring)
+          trend: openMergedOpportunities.some((item) => item.isRecurring)
             ? "Contratos recorrentes no funil"
             : "Sem contratos recorrentes"
         },
@@ -2330,7 +2355,7 @@ export async function getDashboardData(): Promise<DashboardData> {
           trend: tasks.length ? "Acompanhamento ativo" : "Sem pendencias"
         }
       ],
-      pipeline: mergedPipeline.length ? mergedPipeline : pipeline.length ? pipeline : seedDashboardData.pipeline,
+      pipeline: mergedOpportunities.length ? mergedPipeline : pipeline.length ? pipeline : seedDashboardData.pipeline,
       tasks: tasks.length ? tasks : seedTasks,
       agenda: mergeAgendaItems(localAgenda, agenda.length ? agenda : seedAgenda).slice(0, 6),
       activity: [...localActivity, ...(activity.length ? activity : seedActivity)].sort(sortActivityByDateDesc).slice(0, 6)
