@@ -8,6 +8,10 @@ type OpportunityRow = {
   stage: string;
   company: string;
   amount: number;
+  setupAmount: number;
+  baseAmount: number;
+  isRecurring: boolean;
+  months: number;
   status: "open" | "won" | "lost";
   expectedCloseDate: string | null;
   nextStep: string | null;
@@ -23,6 +27,10 @@ type OpportunityQueryRow = {
   id: string;
   title: string;
   amount: number | null;
+  setup_amount: number | null;
+  base_amount: number | null;
+  is_recurring: boolean | null;
+  months: number | null;
   status: "open" | "won" | "lost" | null;
   expected_close_date: string | null;
   next_step: string | null;
@@ -140,7 +148,7 @@ export async function GET(request: NextRequest) {
     serviceClient
       .from("opportunities")
       .select(
-        "id, title, amount, status, next_step, expected_close_date, created_at, accounts:account_id(trade_name, legal_name), pipeline_stages:stage_id(name)"
+        "id, title, amount, setup_amount, base_amount, is_recurring, months, status, next_step, expected_close_date, created_at, accounts:account_id(trade_name, legal_name), pipeline_stages:stage_id(name)"
       )
       .eq("organization_id", profile.organization_id)
       .order("created_at", { ascending: false }),
@@ -189,6 +197,10 @@ export async function GET(request: NextRequest) {
       stage,
       company,
       amount: typeof typedRow.amount === "number" ? typedRow.amount : 0,
+      setupAmount: typeof typedRow.setup_amount === "number" ? typedRow.setup_amount : 0,
+      baseAmount: typeof typedRow.base_amount === "number" ? typedRow.base_amount : 0,
+      isRecurring: Boolean(typedRow.is_recurring),
+      months: Math.max(1, typedRow.months ?? 1),
       status: typedRow.status ?? "open",
       expectedCloseDate: typedRow.expected_close_date ?? null,
       nextStep: typedRow.next_step ?? null,
@@ -198,6 +210,10 @@ export async function GET(request: NextRequest) {
 
   const openOpportunities = opportunities.filter((item) => item.status === "open");
   const totalPipeline = openOpportunities.reduce((sum, item) => sum + item.amount, 0);
+  const totalSetup = openOpportunities.reduce((sum, item) => sum + item.setupAmount, 0);
+  const recurringContractTotal = openOpportunities
+    .filter((item) => item.isRecurring)
+    .reduce((sum, item) => sum + item.baseAmount * item.months, 0);
   const averageOpenAmount = openOpportunities.length
     ? openOpportunities.reduce((sum, item) => sum + item.amount, 0) / openOpportunities.length
     : 0;
@@ -369,6 +385,7 @@ export async function GET(request: NextRequest) {
   drawTextLine(`Oportunidades totais: ${opportunities.length}`);
   drawTextLine(`Abertas: ${openOpportunities.length} | Conquistadas: ${opportunities.filter((o) => o.status === "won").length} | Perdidas: ${opportunities.filter((o) => o.status === "lost").length}`);
   drawTextLine(`Pipeline aberto: ${toCurrency(totalPipeline)}`);
+  drawTextLine(`Implantacoes no pipeline: ${toCurrency(totalSetup)} | Mensalidades contratadas: ${toCurrency(recurringContractTotal)}`);
   drawDivider();
 
   drawSectionTitle("Pipeline por Etapa (abertas)");
@@ -394,12 +411,15 @@ export async function GET(request: NextRequest) {
       row.company,
       row.stage,
       toCurrency(row.amount),
+      row.isRecurring
+        ? `${toCurrency(row.setupAmount)} + ${toCurrency(row.baseAmount)} x ${row.months}`
+        : `${toCurrency(row.setupAmount)} + ${toCurrency(row.baseAmount)}`,
       `${row.attentionLevel} (${row.attentionScore})`
     ]);
   drawTable(
-    ["Titulo", "Empresa", "Etapa", "Valor", "Situacao"],
-    topRows.length ? topRows : [["Sem oportunidades", "-", "-", toCurrency(0), "-"]],
-    [0.25, 0.22, 0.18, 0.15, 0.2]
+    ["Titulo", "Empresa", "Etapa", "Ticket", "Composicao", "Situacao"],
+    topRows.length ? topRows : [["Sem oportunidades", "-", "-", toCurrency(0), "-", "-"]],
+    [0.2, 0.18, 0.14, 0.13, 0.2, 0.15]
   );
 
   const pdfBytes = await pdf.save();

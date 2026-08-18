@@ -77,6 +77,7 @@ create table if not exists public.opportunities (
   owner_id uuid references public.profiles(id) on delete cascade,
   title text not null,
   status public.opportunity_status not null default 'open',
+  setup_amount numeric(12,2) not null default 0,
   base_amount numeric(12,2) not null default 0,
   is_recurring boolean not null default false,
   months integer not null default 1 check (months >= 1),
@@ -88,6 +89,9 @@ create table if not exists public.opportunities (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.opportunities
+  add column if not exists setup_amount numeric(12,2) not null default 0;
 
 alter table public.opportunities
   add column if not exists base_amount numeric(12,2) not null default 0;

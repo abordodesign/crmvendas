@@ -50,6 +50,7 @@ export function OpportunitiesScreen() {
   const [accountId, setAccountId] = useState("");
   const [stageId, setStageId] = useState("");
   const [nextStep, setNextStep] = useState("");
+  const [setupAmount, setSetupAmount] = useState("");
   const [amount, setAmount] = useState("");
   const [isRecurring, setIsRecurring] = useState(false);
   const [months, setMonths] = useState("1");
@@ -168,10 +169,11 @@ export function OpportunitiesScreen() {
   }, []);
 
   const calculatedTicket = useMemo(() => {
+    const implementationAmount = parseCurrencyInput(setupAmount);
     const baseAmount = parseCurrencyInput(amount);
     const multiplier = isRecurring ? Math.max(1, Number(months || 1)) : 1;
-    return baseAmount * multiplier;
-  }, [amount, isRecurring, months]);
+    return implementationAmount + baseAmount * multiplier;
+  }, [amount, isRecurring, months, setupAmount]);
   const selectedStageLabel = useMemo(
     () => stages.find((item) => item.id === stageId)?.label ?? DEFAULT_STAGE_OPTIONS.find((item) => item.id === stageId)?.label ?? "",
     [stageId, stages]
@@ -256,6 +258,7 @@ export function OpportunitiesScreen() {
     setEditingId(null);
     setService("");
     setLeadSource(LEAD_SOURCE_OPTIONS[0]?.id ?? "");
+    setSetupAmount("");
     setAmount("");
     setNextStep("");
     setIsRecurring(false);
@@ -386,6 +389,7 @@ export function OpportunitiesScreen() {
     setService(opportunity.title);
     setLeadSource(leadSourceIdFromLabel(opportunity.leadSource));
     setNextStep(opportunity.nextStep ?? "");
+    setSetupAmount(formatCurrencyInput(opportunity.setupAmount ?? "R$ 0,00"));
     setAmount(formatCurrencyInput(opportunity.baseAmount));
     setIsRecurring(opportunity.isRecurring);
     setMonths(String(opportunity.months));
@@ -459,6 +463,7 @@ export function OpportunitiesScreen() {
             leadSource: leadSourceLabelFromId(leadSource),
             nextStep,
             amount: calculatedTicket,
+            setupAmount: parseCurrencyInput(setupAmount),
             baseAmount: parseCurrencyInput(amount),
             isRecurring,
             months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
@@ -518,12 +523,13 @@ export function OpportunitiesScreen() {
             leadSource: leadSourceLabelFromId(leadSource),
             nextStep,
             amount: calculatedTicket,
+            setupAmount: parseCurrencyInput(setupAmount),
             baseAmount: parseCurrencyInput(amount),
-          isRecurring,
-          months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
-          probability: hasManualProbability ? effectiveProbability : undefined,
-          expectedCloseDate,
-          status: nextStatus,
+            isRecurring,
+            months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
+            probability: hasManualProbability ? effectiveProbability : undefined,
+            expectedCloseDate,
+            status: nextStatus,
             conclusionStatus: showConclusionFields ? resolvedConclusionStatus : undefined,
             conclusionReason: showConclusionFields ? resolvedConclusionReason : undefined,
             concludedAt: showConclusionFields ? `${resolvedConclusionDate}T00:00:00.000Z` : undefined,
@@ -534,10 +540,10 @@ export function OpportunitiesScreen() {
           setOpportunities((current) => upsertOpportunity(current, created));
           setIsViewMode(false);
           setIsFormModalOpen(false);
-        resetForm();
-        setFeedback("Oportunidade adicionada.");
-      })();
-    });
+          resetForm();
+          setFeedback("Oportunidade adicionada.");
+        })();
+      });
   }
 
   function startConclusion() {
@@ -623,6 +629,7 @@ export function OpportunitiesScreen() {
           leadSource: leadSourceLabelFromId(leadSource),
           nextStep,
           amount: calculatedTicket,
+          setupAmount: parseCurrencyInput(setupAmount),
           baseAmount: parseCurrencyInput(amount),
           isRecurring,
           months: isRecurring ? Math.max(1, Number(months || 1)) : 1,
@@ -772,6 +779,8 @@ export function OpportunitiesScreen() {
         stageId={stageId}
         onStageChange={setStageId}
         stages={stages}
+        setupAmount={setupAmount}
+        onSetupAmountChange={setSetupAmount}
         amount={amount}
         onAmountChange={setAmount}
         isRecurring={isRecurring}
@@ -1338,7 +1347,8 @@ export function OpportunitiesScreen() {
                 >
                   <CompactCell label="Fase" value={opportunity.stage} emphasis />
                   <CompactCell label="Responsavel" value={opportunity.owner} />
-                  <CompactCell label="Base" value={opportunity.baseAmount} />
+                  <CompactCell label="Implantacao" value={opportunity.setupAmount ?? "R$ 0,00"} />
+                  <CompactCell label={opportunity.isRecurring ? "Mensalidade" : "Servico"} value={opportunity.baseAmount} />
                   <CompactCell label="Rec." value={opportunity.isRecurring ? "Sim" : "Nao"} />
                   <CompactCell label="Meses" value={String(opportunity.months)} />
                   <CompactCell label="Ticket" value={opportunity.amount} />
@@ -1559,6 +1569,8 @@ function OpportunityFormModal({
   stageId,
   onStageChange,
   stages,
+  setupAmount,
+  onSetupAmountChange,
   amount,
   onAmountChange,
   isRecurring,
@@ -1614,6 +1626,8 @@ function OpportunityFormModal({
   stageId: string;
   onStageChange: (value: string) => void;
   stages: Array<{ id: string; label: string }>;
+  setupAmount: string;
+  onSetupAmountChange: (value: string) => void;
   amount: string;
   onAmountChange: (value: string) => void;
   isRecurring: boolean;
@@ -1791,7 +1805,14 @@ function OpportunityFormModal({
               }}
             >
               <CurrencyField
-                label="Valor base"
+                label="Implantacao (opcional)"
+                value={setupAmount}
+                onChange={onSetupAmountChange}
+                placeholder="2.000,00"
+                disabled={viewMode}
+              />
+              <CurrencyField
+                label={isRecurring ? "Mensalidade" : "Valor do servico"}
                 value={amount}
                 onChange={onAmountChange}
                 placeholder="1.788,30"
@@ -1904,6 +1925,15 @@ function OpportunityFormModal({
                   label="Probabilidade"
                   value={`${effectiveProbability}%${hasManualProbability ? " manual" : " pela etapa"}`}
                 />
+                <ModalStat label="Implantacao" value={formatCurrency(parseCurrencyInput(setupAmount))} />
+                <ModalStat
+                  label={isRecurring ? "Mensalidades" : "Servico"}
+                  value={
+                    isRecurring
+                      ? `${formatCurrency(parseCurrencyInput(amount))} x ${Math.max(1, Number(months || 1))}`
+                      : formatCurrency(parseCurrencyInput(amount))
+                  }
+                />
                 <ModalStat label="Ticket" value={formatCurrency(calculatedTicket)} strong />
               </div>
             </div>
@@ -1924,7 +1954,9 @@ function OpportunityFormModal({
                 {formatCurrency(calculatedTicket)}
               </div>
               <div style={{ marginTop: 8, fontSize: 12, lineHeight: 1.55 }}>
-                {isRecurring ? `Valor base multiplicado por ${months || "1"} mes(es).` : "Valor unico da oportunidade."}{" "}
+                {isRecurring
+                  ? `${formatCurrency(parseCurrencyInput(setupAmount))} de implantacao + ${formatCurrency(parseCurrencyInput(amount))} por ${Math.max(1, Number(months || 1))} mes(es).`
+                  : `${formatCurrency(parseCurrencyInput(setupAmount))} de implantacao + ${formatCurrency(parseCurrencyInput(amount))} do servico.`}{" "}
                 Valor ponderado: {formatCurrency(calculatedTicket * (effectiveProbability / 100))}.
               </div>
             </div>

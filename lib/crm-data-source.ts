@@ -216,6 +216,7 @@ type OpportunityQueryRecord = {
   id: string;
   title: string;
   amount: number | null;
+  setup_amount?: number | null;
   base_amount: number | null;
   is_recurring: boolean | null;
   months: number | null;
@@ -746,10 +747,18 @@ function withRadarDefaults(item: CustomerItem): CustomerItem {
 function mergeOpportunities(primary: OpportunityItem[], secondary: OpportunityItem[]) {
   const byId = new Map<string, OpportunityItem>();
 
-  secondary.forEach((item) => byId.set(item.id, item));
-  primary.forEach((item) => byId.set(item.id, item));
+  secondary.forEach((item) => byId.set(item.id, { ...item, setupAmount: item.setupAmount ?? currency(0) }));
+  primary.forEach((item) => byId.set(item.id, { ...item, setupAmount: item.setupAmount ?? currency(0) }));
 
   return Array.from(byId.values());
+}
+
+function recurringContractValue(item: OpportunityItem) {
+  if (!item.isRecurring) {
+    return 0;
+  }
+
+  return amountLabelToNumber(item.baseAmount) * Math.max(1, item.months || 1);
 }
 
 export function notifyCrmDataChanged() {
@@ -2150,7 +2159,7 @@ export async function getDashboardData(): Promise<DashboardData> {
         const totalPipeline = openMerged.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
         const recurringTotal = openMerged
           .filter((item) => item.isRecurring)
-          .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+          .reduce((sum, item) => sum + recurringContractValue(item), 0);
         const monthRevenue = getClosedRevenueThisMonth(merged);
         const averageTicket = openMerged.length ? totalPipeline / openMerged.length : 0;
 
@@ -2327,6 +2336,7 @@ export async function getDashboardData(): Promise<DashboardData> {
           stage,
           owner: owner?.full_name ?? "Sem responsavel",
           nextStep: "Atualizar proximo passo",
+          setupAmount: currency(0),
           baseAmount: currency(opportunity.base_amount),
           isRecurring: Boolean(opportunity.is_recurring),
           months: opportunity.months ?? 1,
@@ -2347,7 +2357,7 @@ export async function getDashboardData(): Promise<DashboardData> {
     const mergedTotal = openMergedOpportunities.reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
     const recurringTotal = openMergedOpportunities
       .filter((item) => item.isRecurring)
-      .reduce((sum, item) => sum + amountLabelToNumber(item.amount), 0);
+      .reduce((sum, item) => sum + recurringContractValue(item), 0);
     const monthRevenue = getClosedRevenueThisMonth(mergedOpportunities);
     const averageTicket = openMergedOpportunities.length ? mergedTotal / openMergedOpportunities.length : 0;
 
@@ -2460,7 +2470,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
       const primaryQuery = await supabase
         .from("opportunities")
         .select(
-          "id, title, amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
+          "id, title, amount, setup_amount, base_amount, is_recurring, months, owner_id, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name), profiles:owner_id(full_name)"
         )
         .order("created_at", { ascending: false });
       let data = (primaryQuery.data ?? null) as OpportunityQueryRecord[] | null;
@@ -2508,6 +2518,7 @@ export async function getOpportunities(): Promise<OpportunityItem[]> {
           stage: normalizeStageLabel(stage?.name),
           owner: resolveCurrentUserLabel(currentContext, opportunity.owner_id, owner?.full_name ?? "Sem responsavel"),
           nextStep: opportunity.next_step ?? "Atualizar proximo passo",
+          setupAmount: currency(opportunity.setup_amount),
           baseAmount: currency(opportunity.base_amount),
           isRecurring: Boolean(opportunity.is_recurring),
           months: opportunity.months ?? 1,
@@ -3116,6 +3127,7 @@ export async function createOpportunity(input: {
   leadSource?: string;
   nextStep?: string;
   amount: number;
+  setupAmount: number;
   baseAmount: number;
   isRecurring: boolean;
   months: number;
@@ -3139,6 +3151,7 @@ export async function createOpportunity(input: {
     stage: input.stageLabel ?? "Etapa selecionada",
     owner: context?.fullName ?? "Equipe",
     nextStep: input.nextStep,
+    setupAmount: currency(input.setupAmount),
     baseAmount: currency(input.baseAmount),
     isRecurring: input.isRecurring,
     months: input.months,
@@ -3177,6 +3190,7 @@ export async function createOpportunity(input: {
       status: mapUiOpportunityStatusToDb(input.status),
       lead_source: input.leadSource || null,
       next_step: input.nextStep || null,
+      setup_amount: input.setupAmount,
       base_amount: input.baseAmount,
       is_recurring: input.isRecurring,
       months: input.months,
@@ -3188,7 +3202,7 @@ export async function createOpportunity(input: {
       concluded_at: input.concludedAt || null
     })
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, setup_amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -3209,6 +3223,7 @@ export async function createOpportunity(input: {
     stage: normalizeStageLabel(stage?.name),
     owner: context.fullName,
     nextStep: data.next_step ?? undefined,
+    setupAmount: currency(data.setup_amount),
     baseAmount: currency(data.base_amount),
     isRecurring: Boolean(data.is_recurring),
     months: data.months ?? input.months,
@@ -3247,6 +3262,7 @@ export async function updateOpportunity(input: {
   leadSource?: string;
   nextStep?: string;
   amount: number;
+  setupAmount: number;
   baseAmount: number;
   isRecurring: boolean;
   months: number;
@@ -3270,6 +3286,7 @@ export async function updateOpportunity(input: {
     stage: input.stageLabel ?? input.currentStage,
     owner: context?.fullName ?? "Equipe",
     nextStep: input.nextStep,
+    setupAmount: currency(input.setupAmount),
     baseAmount: currency(input.baseAmount),
     isRecurring: input.isRecurring,
     months: input.months,
@@ -3308,6 +3325,7 @@ export async function updateOpportunity(input: {
       status: mapUiOpportunityStatusToDb(input.status),
       lead_source: input.leadSource || null,
       next_step: input.nextStep || null,
+      setup_amount: input.setupAmount,
       base_amount: input.baseAmount,
       is_recurring: input.isRecurring,
       months: input.months,
@@ -3320,7 +3338,7 @@ export async function updateOpportunity(input: {
     })
     .eq("id", input.id)
     .select(
-      "id, title, amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
+      "id, title, amount, setup_amount, base_amount, is_recurring, months, status, next_step, expected_close_date, conclusion_status, conclusion_reason, concluded_at, probability_override, lead_source, created_at, pipeline_stages:stage_id(name, probability), accounts:account_id(trade_name, legal_name)"
     )
     .single();
 
@@ -3341,6 +3359,7 @@ export async function updateOpportunity(input: {
     stage: normalizeStageLabel(input.stageLabel ?? stage?.name ?? input.currentStage),
     owner: context.fullName,
     nextStep: data.next_step ?? undefined,
+    setupAmount: currency(data.setup_amount),
     baseAmount: currency(data.base_amount),
     isRecurring: Boolean(data.is_recurring),
     months: data.months ?? input.months,

@@ -130,6 +130,7 @@ export type OpportunityItem = {
   stage: string;
   owner: string;
   nextStep?: string;
+  setupAmount: string;
   baseAmount: string;
   isRecurring: boolean;
   months: number;
