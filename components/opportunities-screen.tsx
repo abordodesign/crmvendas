@@ -82,6 +82,7 @@ export function OpportunitiesScreen() {
   const [newCustomerRadarNextAction, setNewCustomerRadarNextAction] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [opportunityPendingDelete, setOpportunityPendingDelete] = useState<OpportunityItem | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [draggedOpportunityId, setDraggedOpportunityId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
@@ -724,6 +725,7 @@ export function OpportunitiesScreen() {
     }
 
     setOpportunityPendingDelete(opportunity);
+    setDeleteError(null);
     setFeedback(null);
   }
 
@@ -743,11 +745,12 @@ export function OpportunitiesScreen() {
         if (result.ok) {
           setOpportunities((current) => current.filter((item) => item.id !== currentOpportunity.id));
           setFeedback(result.message);
+          setDeleteError(null);
+          setOpportunityPendingDelete(null);
         } else {
           setFeedback(result.message);
+          setDeleteError(result.message);
         }
-
-        setOpportunityPendingDelete(null);
       })();
     });
   }
@@ -884,7 +887,11 @@ export function OpportunitiesScreen() {
       <DeleteOpportunityModal
         opportunity={opportunityPendingDelete}
         isPending={isPending}
-        onClose={() => setOpportunityPendingDelete(null)}
+        error={deleteError}
+        onClose={() => {
+          setOpportunityPendingDelete(null);
+          setDeleteError(null);
+        }}
         onConfirm={confirmDelete}
       />
       <section
@@ -2067,11 +2074,13 @@ function OpportunityFormModal({
 function DeleteOpportunityModal({
   opportunity,
   isPending,
+  error,
   onClose,
   onConfirm
 }: {
   opportunity: OpportunityItem | null;
   isPending: boolean;
+  error: string | null;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -2084,13 +2093,14 @@ function DeleteOpportunityModal({
       <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
         <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
         <h2 style={confirmTitleStyle}>Excluir oportunidade?</h2>
-        <div style={confirmTextStyle}>Revise os dados abaixo antes de remover o registro do funil.</div>
+        <div style={confirmTextStyle}>A oportunidade e seus registros vinculados serao removidos permanentemente.</div>
         <div style={confirmGridStyle}>
           <CompactCell label="Servico" value={opportunity.title} />
           <CompactCell label="Conta" value={opportunity.company} />
           <CompactCell label="Fase" value={opportunity.stage} />
           <CompactCell label="Ticket" value={opportunity.amount} emphasis />
         </div>
+        {error ? <div style={deleteErrorStyle}>{error}</div> : null}
         <div style={confirmActionsStyle}>
           <button type="button" onClick={onClose} style={secondaryButtonStyle}>
             Cancelar
@@ -2320,6 +2330,16 @@ const secondaryButtonStyle: React.CSSProperties = {
 const feedbackStyle: React.CSSProperties = {
   marginTop: 12,
   color: "var(--secondary)",
+  fontSize: 13,
+  fontWeight: 700
+};
+
+const deleteErrorStyle: React.CSSProperties = {
+  marginTop: 14,
+  padding: "10px 12px",
+  borderRadius: 12,
+  background: "rgba(220, 38, 38, 0.08)",
+  color: "#b91c1c",
   fontSize: 13,
   fontWeight: 700
 };

@@ -3410,30 +3410,23 @@ export async function deleteOpportunity(input: { id: string; title: string }): P
     return { ok: true, message: "Oportunidade removida." };
   }
 
-  const [tasksRes, activitiesRes] = await Promise.all([
-    supabase.from("tasks").select("id", { count: "exact", head: true }).eq("opportunity_id", input.id),
-    supabase.from("activities").select("id", { count: "exact", head: true }).eq("opportunity_id", input.id)
-  ]);
-
-  const taskCount = tasksRes.count ?? 0;
-  const activityCount = activitiesRes.count ?? 0;
-
-  if (taskCount > 0 || activityCount > 0) {
-    const dependencyLabels = [
-      taskCount ? `${taskCount} tarefa(s)` : null,
-      activityCount ? `${activityCount} atividade(s)` : null
-    ].filter(Boolean);
-
-    return {
-      ok: false,
-      message: `Exclusao bloqueada. Esta oportunidade ainda possui ${dependencyLabels.join(", ")} vinculadas.`
-    };
-  }
-
-  const { error } = await supabase.from("opportunities").delete().eq("id", input.id);
+  // As chaves estrangeiras de tarefas e atividades usam ON DELETE CASCADE.
+  // A exclusao da oportunidade, portanto, remove seus vinculos em uma unica operacao no banco.
+  const { data: deletedItems, error } = await supabase
+    .from("opportunities")
+    .delete()
+    .eq("id", input.id)
+    .select("id");
 
   if (error) {
-    return { ok: false, message: "Nao foi possivel excluir a oportunidade." };
+    return { ok: false, message: `Nao foi possivel excluir a oportunidade: ${error.message}` };
+  }
+
+  if (!deletedItems?.length) {
+    return {
+      ok: false,
+      message: "A oportunidade nao foi excluida. Seu usuario pode nao ter permissao para remover este registro."
+    };
   }
 
   removeLocalOpportunityPreview(input.id);
