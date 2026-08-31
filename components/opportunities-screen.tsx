@@ -82,8 +82,12 @@ export function OpportunitiesScreen() {
   const [newCustomerRadarNextAction, setNewCustomerRadarNextAction] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [opportunityPendingDelete, setOpportunityPendingDelete] = useState<OpportunityItem | null>(null);
+  const [opportunityFirstDelete, setOpportunityFirstDelete] = useState<OpportunityItem | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [opportunitySearch, setOpportunitySearch] = useState("");
+  const [stageFilter, setStageFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState("all");
   const [draggedOpportunityId, setDraggedOpportunityId] = useState<string | null>(null);
   const [dragOverStage, setDragOverStage] = useState<string | null>(null);
   const [recentlyMovedOpportunityId, setRecentlyMovedOpportunityId] = useState<string | null>(null);
@@ -202,10 +206,29 @@ export function OpportunitiesScreen() {
   const resolvedConclusionReason = shouldShowConclusionFields ? conclusionReason || CONCLUSION_REASON_OPTIONS[0]?.id || "" : "";
   const resolvedConclusionDate =
     shouldShowConclusionFields ? conclusionDate || new Date().toISOString().slice(0, 10) : "";
+  const ownerOptions = useMemo(
+    () => [...new Set(opportunities.map((item) => item.owner).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    [opportunities]
+  );
+  const filteredOpportunities = useMemo(() => {
+    const search = normalizeSearchText(opportunitySearch);
+
+    return opportunities.filter((item) => {
+      const matchesSearch =
+        !search ||
+        [item.title, item.company, item.owner, item.leadSource, item.nextStep].some((value) =>
+          normalizeSearchText(value ?? "").includes(search)
+        );
+      const matchesStage = stageFilter === "all" || item.stage === stageFilter;
+      const matchesOwner = ownerFilter === "all" || item.owner === ownerFilter;
+
+      return matchesSearch && matchesStage && matchesOwner;
+    });
+  }, [opportunities, opportunitySearch, ownerFilter, stageFilter]);
   const boardColumns = useMemo(
     () =>
       STAGE_FLOW.map((stageLabel) => {
-        const deals = opportunities.filter((item) => item.stage === stageLabel);
+        const deals = filteredOpportunities.filter((item) => item.stage === stageLabel);
 
         return {
           id: stageLabel,
@@ -214,7 +237,7 @@ export function OpportunitiesScreen() {
           total: formatCurrency(deals.reduce((sum, item) => sum + amountToNumber(item.amount), 0))
         };
       }),
-    [opportunities]
+    [filteredOpportunities]
   );
   useEffect(() => {
     if (!recentlyMovedOpportunityId) {
@@ -805,6 +828,13 @@ export function OpportunitiesScreen() {
         onConclusionDateChange={setConclusionDate}
         calculatedTicket={calculatedTicket}
         onEnableEdit={() => setIsViewMode(false)}
+        onRequestDelete={() => {
+          const opportunity = opportunities.find((item) => item.id === editingId);
+
+          if (opportunity) {
+            setOpportunityFirstDelete(opportunity);
+          }
+        }}
         onStartConclusion={startConclusion}
         onConclude={handleConcludeNow}
         notes={opportunityNotes}
@@ -893,6 +923,23 @@ export function OpportunitiesScreen() {
           setDeleteError(null);
         }}
         onConfirm={confirmDelete}
+      />
+      <FirstDeleteOpportunityModal
+        opportunity={opportunityFirstDelete}
+        onClose={() => setOpportunityFirstDelete(null)}
+        onContinue={() => {
+          const opportunity = opportunityFirstDelete;
+          setOpportunityFirstDelete(null);
+
+          if (!opportunity) {
+            return;
+          }
+
+          setIsViewMode(false);
+          setIsFormModalOpen(false);
+          resetForm();
+          requestDelete(opportunity);
+        }}
       />
       <section
         style={{
@@ -1230,15 +1277,41 @@ export function OpportunitiesScreen() {
             marginBottom: 16
           }}
         >
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <div style={pillStyle}>Buscar oportunidade</div>
-              <div style={pillStyle}>Fase</div>
-              <div style={pillStyle}>Responsavel</div>
+            <div style={filterBarStyle}>
+              <input
+                type="search"
+                value={opportunitySearch}
+                onChange={(event) => setOpportunitySearch(event.target.value)}
+                placeholder="Buscar oportunidade"
+                aria-label="Buscar oportunidade"
+                style={filterInputStyle}
+              />
+              <select value={stageFilter} onChange={(event) => setStageFilter(event.target.value)} aria-label="Filtrar por fase" style={filterSelectStyle}>
+                <option value="all">Todas as fases</option>
+                {STAGE_FLOW.map((stage) => <option key={stage} value={stage}>{stage}</option>)}
+              </select>
+              <select value={ownerFilter} onChange={(event) => setOwnerFilter(event.target.value)} aria-label="Filtrar por responsavel" style={filterSelectStyle}>
+                <option value="all">Todos os responsaveis</option>
+                {ownerOptions.map((owner) => <option key={owner} value={owner}>{owner}</option>)}
+              </select>
+              {opportunitySearch || stageFilter !== "all" || ownerFilter !== "all" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpportunitySearch("");
+                    setStageFilter("all");
+                    setOwnerFilter("all");
+                  }}
+                  style={clearFiltersButtonStyle}
+                >
+                  Limpar filtros
+                </button>
+              ) : null}
             </div>
         </div>
 
         <div style={{ display: "grid", gap: 12 }}>
-          {opportunities.map((opportunity) => (
+          {filteredOpportunities.map((opportunity) => (
             <div key={opportunity.id}>
               <article
                 onClick={() => openView(opportunity)}
@@ -1367,6 +1440,9 @@ export function OpportunitiesScreen() {
               </article>
             </div>
           ))}
+          {!filteredOpportunities.length ? (
+            <div style={emptyFilterStyle}>Nenhuma oportunidade encontrada com os filtros selecionados.</div>
+          ) : null}
         </div>
       </section>
     </CrmShell>
@@ -1599,6 +1675,7 @@ function OpportunityFormModal({
   onConclusionDateChange,
   calculatedTicket,
   onEnableEdit,
+  onRequestDelete,
   onStartConclusion,
   onConclude,
   notes,
@@ -1656,6 +1733,7 @@ function OpportunityFormModal({
   onConclusionDateChange: (value: string) => void;
   calculatedTicket: number;
   onEnableEdit: () => void;
+  onRequestDelete: () => void;
   onStartConclusion: () => void;
   onConclude: () => void;
   notes: OpportunityNote[];
@@ -2046,6 +2124,9 @@ function OpportunityFormModal({
           </button>
           {editing && viewMode ? (
             <>
+              <button type="button" onClick={onRequestDelete} disabled={isPending || !canSubmit} style={deleteButtonStyle}>
+                Excluir oportunidade
+              </button>
               {!isConclusionMode && !showConclusionFields ? (
                 <button type="button" onClick={onStartConclusion} disabled={isPending || !canConclude} style={conclusionButtonStyle}>
                   Concluir
@@ -2065,6 +2146,40 @@ function OpportunityFormModal({
               {isPending ? "Salvando..." : editing ? "Salvar edicao" : "Salvar oportunidade"}
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FirstDeleteOpportunityModal({
+  opportunity,
+  onClose,
+  onContinue
+}: {
+  opportunity: OpportunityItem | null;
+  onClose: () => void;
+  onContinue: () => void;
+}) {
+  if (!opportunity) {
+    return null;
+  }
+
+  return (
+    <div style={{ ...modalOverlayStyle, zIndex: 60 }}>
+      <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
+        <div style={confirmEyebrowStyle}>Etapa 1 de 2</div>
+        <h2 style={confirmTitleStyle}>Deseja iniciar a exclusao?</h2>
+        <div style={confirmTextStyle}>
+          Voce esta prestes a excluir permanentemente a oportunidade <strong>{opportunity.title}</strong>. Ainda sera necessario confirmar na proxima etapa.
+        </div>
+        <div style={confirmActionsStyle}>
+          <button type="button" onClick={onClose} style={secondaryButtonStyle}>
+            Manter oportunidade
+          </button>
+          <button type="button" onClick={onContinue} style={deleteButtonStyle}>
+            Continuar para confirmacao
+          </button>
         </div>
       </div>
     </div>
@@ -2091,7 +2206,7 @@ function DeleteOpportunityModal({
   return (
     <div style={modalOverlayStyle}>
       <div style={confirmCardStyle} onClick={(event) => event.stopPropagation()}>
-        <div style={confirmEyebrowStyle}>Confirmar exclusao</div>
+        <div style={confirmEyebrowStyle}>Etapa 2 de 2 · Confirmar exclusao</div>
         <h2 style={confirmTitleStyle}>Excluir oportunidade?</h2>
         <div style={confirmTextStyle}>A oportunidade e seus registros vinculados serao removidos permanentemente.</div>
         <div style={confirmGridStyle}>
@@ -2299,6 +2414,46 @@ const inputStyle: React.CSSProperties = {
   minWidth: 0,
   maxWidth: "100%",
   boxSizing: "border-box"
+};
+
+const filterBarStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+  width: "100%"
+};
+
+const filterInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  width: "min(100%, 280px)"
+};
+
+const filterSelectStyle: React.CSSProperties = {
+  ...inputStyle,
+  width: "auto",
+  minWidth: 170,
+  cursor: "pointer"
+};
+
+const clearFiltersButtonStyle: React.CSSProperties = {
+  minHeight: 44,
+  borderRadius: 12,
+  border: "1px solid var(--line)",
+  padding: "11px 14px",
+  background: "#ffffff",
+  font: "inherit",
+  fontWeight: 800,
+  cursor: "pointer",
+  whiteSpace: "nowrap"
+};
+
+const emptyFilterStyle: React.CSSProperties = {
+  padding: "18px",
+  borderRadius: 16,
+  border: "1px dashed var(--line)",
+  color: "var(--muted)",
+  fontSize: 14,
+  textAlign: "center"
 };
 
 const submitButtonStyle: React.CSSProperties = {
