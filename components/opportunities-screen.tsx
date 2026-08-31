@@ -850,6 +850,7 @@ export function OpportunitiesScreen() {
         }}
         onSubmit={handleSubmit}
         isPending={isPending}
+        canEdit={canEdit}
         canSubmit={
           Boolean(editingId ? canEdit : canCreate) &&
           Boolean(accountId && service.trim() && amount.trim() && stageId && expectedCloseDate)
@@ -1687,6 +1688,7 @@ function OpportunityFormModal({
   onClose,
   onSubmit,
   isPending,
+  canEdit,
   canSubmit,
   canConclude,
   isConclusionMode
@@ -1745,6 +1747,7 @@ function OpportunityFormModal({
   onClose: () => void;
   onSubmit: () => void;
   isPending: boolean;
+  canEdit: boolean;
   canSubmit: boolean;
   canConclude: boolean;
   isConclusionMode: boolean;
@@ -2136,12 +2139,12 @@ function OpportunityFormModal({
                   {isPending ? "Concluindo..." : "Salvar conclusao"}
                 </button>
               ) : null}
-              <button type="button" onClick={onEnableEdit} disabled={!canSubmit} style={submitButtonStyle}>
+              <button type="button" onClick={onEnableEdit} disabled={!canEdit} style={submitButtonStyle}>
                 Editar agora
               </button>
               </div>
               <div style={{ width: 1, height: 28, background: "var(--line)" }} />
-              <button type="button" onClick={onRequestDelete} disabled={isPending || !canSubmit} style={dangerFooterButtonStyle}>
+              <button type="button" onClick={onRequestDelete} disabled={isPending || !canEdit} style={dangerFooterButtonStyle}>
                 Excluir
               </button>
             </div>
