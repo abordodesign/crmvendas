@@ -2110,7 +2110,8 @@ function OpportunityFormModal({
             bottom: -18,
             marginTop: 20,
             display: "flex",
-            justifyContent: "flex-end",
+            justifyContent: "space-between",
+            alignItems: "center",
             gap: 12,
             flexWrap: "wrap",
             paddingTop: 18,
@@ -2123,10 +2124,8 @@ function OpportunityFormModal({
             {viewMode ? "Fechar" : "Cancelar"}
           </button>
           {editing && viewMode ? (
-            <>
-              <button type="button" onClick={onRequestDelete} disabled={isPending || !canSubmit} style={deleteButtonStyle}>
-                Excluir oportunidade
-              </button>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 12, flexWrap: "wrap", marginLeft: "auto" }}>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
               {!isConclusionMode && !showConclusionFields ? (
                 <button type="button" onClick={onStartConclusion} disabled={isPending || !canConclude} style={conclusionButtonStyle}>
                   Concluir
@@ -2140,11 +2139,18 @@ function OpportunityFormModal({
               <button type="button" onClick={onEnableEdit} disabled={!canSubmit} style={submitButtonStyle}>
                 Editar agora
               </button>
-            </>
+              </div>
+              <div style={{ width: 1, height: 28, background: "var(--line)" }} />
+              <button type="button" onClick={onRequestDelete} disabled={isPending || !canSubmit} style={dangerFooterButtonStyle}>
+                Excluir
+              </button>
+            </div>
           ) : (
-            <button type="button" onClick={onSubmit} disabled={isPending || !canSubmit} style={submitButtonStyle}>
-              {isPending ? "Salvando..." : editing ? "Salvar edicao" : "Salvar oportunidade"}
-            </button>
+            <div style={{ marginLeft: "auto" }}>
+              <button type="button" onClick={onSubmit} disabled={isPending || !canSubmit} style={submitButtonStyle}>
+                {isPending ? "Salvando..." : editing ? "Salvar edicao" : "Salvar oportunidade"}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -2526,6 +2532,12 @@ const deleteButtonStyle: React.CSSProperties = {
   fontWeight: 800,
   fontSize: 13,
   cursor: "pointer"
+};
+
+const dangerFooterButtonStyle: React.CSSProperties = {
+  ...deleteButtonStyle,
+  minHeight: 44,
+  padding: "11px 14px"
 };
 
 const modalOverlayStyle: React.CSSProperties = {
